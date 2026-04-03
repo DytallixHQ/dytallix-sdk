@@ -19,7 +19,7 @@ Dytallix was built by one person. Contributions are welcome.
 
 ## Questions
 
-Open a GitHub issue or join Discord at https://discord.com/invite/eyVvu5kmPG
+Open a GitHub issue or join Discord at https://discord.gg/eyVvu5kmPG
 
 ## Other Repositories
 

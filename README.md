@@ -10,7 +10,7 @@ Dytallix is a Layer 1 blockchain engineered for the post-quantum era.
 
 All signing uses ML-DSA-65 (FIPS 204). All addresses are canonical Bech32m.
 
-No ECDSA. No hybrid mode. No legacy accounts.
+Only PQC-native accounts are supported. No hybrid mode. No legacy accounts.
 
 ## Structure
 
@@ -37,6 +37,6 @@ No ECDSA. No hybrid mode. No legacy accounts.
 - Website: https://dytallix.com
 - Documentation: https://github.com/DytallixHQ/dytallix-docs
 - Whitepapers: https://dytallix.com
-- Discord: https://discord.com/invite/eyVvu5kmPG
+- Discord: https://discord.gg/eyVvu5kmPG
 - Explorer: https://github.com/DytallixHQ/dytallix-explorer
 - Faucet: https://github.com/DytallixHQ/dytallix-faucet

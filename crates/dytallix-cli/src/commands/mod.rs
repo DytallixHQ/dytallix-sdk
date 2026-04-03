@@ -35,7 +35,7 @@ const MAINNET_ENDPOINT: &str = "https://mainnet.dytallix.com";
 const TESTNET_PUBLIC_API: &str = "https://dytallix.com/api";
 const TESTNET_FAUCET: &str = "https://faucet.dytallix.com";
 const LOCAL_FAUCET: &str = "http://localhost:3004";
-const DISCORD_LINK: &str = "https://discord.com/invite/eyVvu5kmPG";
+const DISCORD_LINK: &str = "https://discord.gg/eyVvu5kmPG";
 const EXPLORER_LINK: &str = "https://explorer.dytallix.com";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -500,6 +500,6 @@ mod tests {
 
         let address = DAddr::from_public_key(DytallixKeypair::generate().public_key()).unwrap();
         let timeout = faucet_balance_timeout(&address).to_string();
-        assert!(timeout.contains("discord.com/invite/eyVvu5kmPG"));
+        assert!(timeout.contains("discord.gg/eyVvu5kmPG"));
     }
 }

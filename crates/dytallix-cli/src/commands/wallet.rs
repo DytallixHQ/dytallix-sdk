@@ -171,25 +171,14 @@ fn switch_wallet(name: &str) -> Result<()> {
 }
 
 fn rotate_wallet() -> Result<()> {
-    let mut keystore = load_keystore()?;
-    let active = active_entry(&keystore)?.clone();
-    let old_address = active.address.clone();
-    let replacement = DytallixKeypair::generate();
+    let keystore = load_keystore()?;
+    let active = active_entry(&keystore)?;
 
-    keystore
-        .add_keypair(&replacement, &active.name)
-        .map_err(humanize_sdk_error)?;
-    keystore
-        .set_active(&active.name)
-        .map_err(humanize_sdk_error)?;
-    keystore.save().map_err(humanize_sdk_error)?;
-
-    let updated = keystore.active().unwrap();
-    output::warning("D-Addr rotation is not cryptographically possible because the D-Addr is derived from the public key.");
-    println!("Old D-Addr: {old_address}");
-    println!("New D-Addr: {}", updated.address);
-    output::success("Wallet rotated with a fresh ML-DSA-65 keypair", None);
-    Ok(())
+    Err(anyhow!(
+        "Cannot rotate wallet `{}` while preserving {} because the D-Addr is derived from the ML-DSA-65 public key. Use `dytallix wallet create` to make a new wallet or `dytallix wallet export` before replacing this key.",
+        active.name,
+        active.address
+    ))
 }
 
 fn wallet_info() -> Result<()> {
