@@ -19,21 +19,22 @@ pub struct FaucetArgs {
 pub async fn run(args: FaucetArgs) -> Result<()> {
     match args.target.as_deref() {
         Some("status") => {
-            let status = faucet_status().await?;
+            let keystore = load_keystore()?;
+            let address = active_entry(&keystore)?.address.clone();
+            let status = faucet_status(&address).await?;
             output::section("Faucet status");
-            let healthy = status
-                .get("status")
-                .and_then(|value| value.as_str())
-                .map(|value| matches!(value, "healthy" | "operational"))
-                .unwrap_or(false);
-            if healthy {
+            if status.can_request {
                 output::success("Faucet request is available", None);
+            } else if let Some(retry_after_seconds) = status.retry_after_seconds {
+                output::warning(&format!(
+                    "Faucet rate limit reached. Try again in {retry_after_seconds} seconds."
+                ));
             } else {
                 output::warning(
                     "Faucet status is degraded. Check your network connection or try again later.",
                 );
             }
-            println!("{}", serde_json::to_string_pretty(&status)?);
+            println!("Address: {address}");
         }
         Some(raw_address) => {
             let address = validate_address(raw_address)?;

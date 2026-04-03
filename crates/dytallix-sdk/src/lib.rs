@@ -46,8 +46,8 @@ pub struct Balance {
 
 impl fmt::Display for Balance {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "DGT:  {} DGT", self.dgt)?;
-        write!(f, "DRT:  {} DRT", self.drt)
+        writeln!(f, "  DGT:  {} DGT", self.dgt)?;
+        write!(f, "  DRT:  {} DRT", self.drt)
     }
 }
 
@@ -83,18 +83,18 @@ pub struct FeeEstimate {
 
 impl fmt::Display for FeeEstimate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Fee estimate:")?;
+        writeln!(f, "  Fee estimate:")?;
         writeln!(
             f,
-            "Compute (C-Gas):   {} units  {} DRT",
+            "    Compute (C-Gas):   {} units  {} DRT",
             self.c_gas, self.c_gas_cost_drt
         )?;
         writeln!(
             f,
-            "Bandwidth (B-Gas): {} units  {} DRT",
+            "    Bandwidth (B-Gas): {} units  {} DRT",
             self.b_gas, self.b_gas_cost_drt
         )?;
-        write!(f, "Total:             {} DRT", self.total_cost_drt)
+        write!(f, "    Total:             {} DRT", self.total_cost_drt)
     }
 }
 
@@ -255,12 +255,7 @@ mod tests {
             dgt: 1_000,
             drt: 10_000,
         };
-        let display = balance.to_string();
-
-        assert!(display.contains("DGT"));
-        assert!(display.contains("DRT"));
-        assert!(display.contains("1000"));
-        assert!(display.contains("10000"));
+        assert_eq!(balance.to_string(), "  DGT:  1000 DGT\n  DRT:  10000 DRT");
     }
 
     #[test]
@@ -272,11 +267,10 @@ mod tests {
             b_gas_cost_drt: 7,
             total_cost_drt: 49,
         };
-        let display = fee.to_string();
-
-        assert!(display.contains("C-Gas"));
-        assert!(display.contains("B-Gas"));
-        assert!(display.contains("Total"));
+        assert_eq!(
+            fee.to_string(),
+            "  Fee estimate:\n    Compute (C-Gas):   21000 units  42 DRT\n    Bandwidth (B-Gas): 512 units  7 DRT\n    Total:             49 DRT"
+        );
     }
 
     #[test]

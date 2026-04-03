@@ -16,6 +16,7 @@ use crate::output;
 /// Runs the `init` command.
 pub async fn run() -> Result<()> {
     println!("Dytallix Testnet — Initializing");
+    println!();
     let mut services = RealInitServices;
     run_with_services(&mut services, |line| println!("{line}")).await?;
     Ok(())
@@ -77,28 +78,39 @@ where
         format_number(balance.drt),
         received_elapsed.as_secs_f64()
     ));
+    emit(String::new());
     emit("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".to_owned());
-    emit("Milestone 1 complete: funded wallet".to_owned());
-    emit(format!("Elapsed: {:.1}s", overall.elapsed().as_secs_f64()));
+    emit("  Milestone 1 complete: funded wallet".to_owned());
+    emit(format!(
+        "  Elapsed: {:.1}s",
+        overall.elapsed().as_secs_f64()
+    ));
     emit("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".to_owned());
+    emit(String::new());
 
     output::testnet_warning();
+    println!();
     output::divider();
-    println!("Next: send your first transaction");
+    println!("  Next: send your first transaction");
     output::divider();
-    println!("dytallix send {} 100", short_address(&address));
-    println!("Sends 100 DRT to any address.");
-    println!("Gas paid in DRT automatically.");
-    println!("Fee breakdown shown before confirmation.");
-    println!("Run it now to hit Milestone 2.");
+    println!();
+    println!("  dytallix send {} 100", short_address(&address));
+    println!();
+    println!("  Sends 100 DRT to any address.");
+    println!("  Gas paid in DRT automatically.");
+    println!("  Fee breakdown shown before confirmation.");
+    println!("  Run it now to hit Milestone 2.");
+    println!();
     output::divider();
-    println!("Next: deploy your first contract");
+    println!("  Next: deploy your first contract");
     output::divider();
-    println!("dytallix contract deploy ./my_contract.wasm");
-    println!("Gas paid in DRT automatically.");
-    println!("Fee breakdown shown before confirmation.");
-    println!("See docs/getting-started.md for a");
-    println!("complete walkthrough to Milestone 3.");
+    println!();
+    println!("  dytallix contract deploy ./my_contract.wasm");
+    println!();
+    println!("  Gas paid in DRT automatically.");
+    println!("  Fee breakdown shown before confirmation.");
+    println!("  See docs/getting-started.md for a");
+    println!("  complete walkthrough to Milestone 3.");
 
     Ok(overall.elapsed())
 }

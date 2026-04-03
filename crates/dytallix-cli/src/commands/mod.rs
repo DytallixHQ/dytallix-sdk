@@ -25,14 +25,13 @@ use dytallix_sdk::client::DytallixClient;
 use dytallix_sdk::error::SdkError;
 use dytallix_sdk::faucet::FaucetClient;
 use dytallix_sdk::keystore::Keystore;
-use dytallix_sdk::{KeystoreEntry, Token};
+use dytallix_sdk::{FaucetStatus, KeystoreEntry, Token};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const TESTNET_ENDPOINT: &str = "https://testnet.dytallix.com";
 const LOCAL_ENDPOINT: &str = "http://localhost:8545";
 const MAINNET_ENDPOINT: &str = "https://mainnet.dytallix.com";
-const TESTNET_PUBLIC_API: &str = "https://dytallix.com/api";
 const TESTNET_FAUCET: &str = "https://faucet.dytallix.com";
 const LOCAL_FAUCET: &str = "http://localhost:3004";
 const DISCORD_LINK: &str = "https://discord.gg/eyVvu5kmPG";
@@ -246,111 +245,40 @@ pub(crate) async fn raw_get_json(path: &str) -> Result<Value> {
     }
 }
 
-pub(crate) async fn faucet_request(address: &DAddr, token_type: &str) -> Result<Value> {
-    let config = load_config()?;
-    let endpoint = faucet_endpoint(config.network)?;
-
-    let (url, body) = match config.network {
-        NetworkProfile::Testnet => {
-            let (dgt_amount, drt_amount) = faucet_amounts(token_type)?;
-            (
-                format!("{TESTNET_PUBLIC_API}/faucet/request"),
-                serde_json::json!({
-                    "address": address.as_str(),
-                    "dgt_amount": dgt_amount,
-                    "drt_amount": drt_amount,
-                }),
-            )
-        }
-        NetworkProfile::Local => (
-            format!("{endpoint}/api/faucet"),
-            serde_json::json!({
-                "address": address.as_str(),
-                "tokenType": token_type,
-            }),
-        ),
-        NetworkProfile::Mainnet => unreachable!("mainnet faucet is rejected earlier"),
-    };
-
-    let response = reqwest::Client::new()
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
-            )
-        })?;
-
-    if response.status().is_success() {
-        response
-            .json()
-            .await
-            .map_err(|err| anyhow!("Failed to decode faucet response from {endpoint}: {err}"))
-    } else {
-        Err(anyhow!(
-            "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
-        ))
+pub(crate) async fn faucet_request(address: &DAddr, token_type: &str) -> Result<()> {
+    let faucet = configured_faucet()?;
+    match token_type.to_ascii_lowercase().as_str() {
+        "both" => faucet.fund(address).await.map(|_| ()),
+        "dgt" => faucet.fund_dgt(address).await.map(|_| ()),
+        "drt" => faucet.fund_drt(address).await.map(|_| ()),
+        other => Err(SdkError::FaucetUnavailable {
+            endpoint: faucet_endpoint(load_config()?.network)?.to_owned(),
+            reason: format!("unsupported faucet token selection: {other}"),
+        }),
     }
+    .map_err(humanize_sdk_error)
 }
 
-pub(crate) async fn faucet_status() -> Result<Value> {
-    let config = load_config()?;
-    let endpoint = faucet_endpoint(config.network)?;
-    let url = match config.network {
-        NetworkProfile::Testnet => format!("{TESTNET_PUBLIC_API}/status"),
-        NetworkProfile::Local => format!("{endpoint}/api/status"),
-        NetworkProfile::Mainnet => unreachable!("mainnet faucet is rejected earlier"),
-    };
-    let response = reqwest::get(&url).await.map_err(|_| {
-        anyhow!(
-            "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
-        )
-    })?;
-
-    if response.status().is_success() {
-        response
-            .json()
-            .await
-            .map_err(|err| anyhow!("Failed to decode faucet response from {endpoint}: {err}"))
-    } else {
-        Err(anyhow!(
-            "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
-        ))
+pub(crate) async fn faucet_status(address: &DAddr) -> Result<FaucetStatus> {
+    let faucet = configured_faucet()?;
+    match faucet.status(address).await {
+        Ok(status) => Ok(status),
+        Err(SdkError::FaucetRateLimited {
+            retry_after_seconds,
+        }) => Ok(FaucetStatus {
+            can_request: false,
+            retry_after_seconds: Some(retry_after_seconds),
+        }),
+        Err(error) => Err(humanize_sdk_error(error)),
     }
 }
 
 pub(crate) async fn faucet_balance(address: &DAddr) -> Result<dytallix_sdk::Balance> {
-    let config = load_config()?;
-    let endpoint = faucet_endpoint(config.network)?;
-    let url = match config.network {
-        NetworkProfile::Testnet => format!("{TESTNET_PUBLIC_API}/blockchain/balance/{address}"),
-        NetworkProfile::Local => format!("{endpoint}/api/balance/{address}"),
-        NetworkProfile::Mainnet => unreachable!("mainnet faucet is rejected earlier"),
-    };
-    let response = reqwest::get(&url).await.map_err(|_| {
-        anyhow!(
-            "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
-        )
-    })?;
-
-    if !response.status().is_success() {
-        return Err(anyhow!(
-            "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
-        ));
-    }
-
-    let value: Value = response.json().await.map_err(|err| {
-        anyhow!("Failed to decode faucet balance response from {endpoint}: {err}")
-    })?;
-
-    Ok(dytallix_sdk::Balance {
-        dgt: extract_balance_value(&value, &["balances", "udgt", "balance"]).unwrap_or(0)
-            / 1_000_000,
-        drt: extract_balance_value(&value, &["balances", "udrt", "balance"]).unwrap_or(0)
-            / 1_000_000,
-    })
+    configured_client()
+        .await?
+        .get_balance(address)
+        .await
+        .map_err(humanize_sdk_error)
 }
 
 pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
@@ -449,28 +377,6 @@ fn decode_hex_nibble(ch: char) -> Result<u8> {
         'A'..='F' => Ok((ch as u8) - b'A' + 10),
         _ => Err(anyhow!("Invalid hex input. `{ch}` is not a hex character.")),
     }
-}
-
-fn faucet_amounts(token_type: &str) -> Result<(u64, u64)> {
-    match token_type.to_ascii_lowercase().as_str() {
-        "both" => Ok((1_000, 10_000)),
-        "dgt" => Ok((1_000, 0)),
-        "drt" => Ok((0, 10_000)),
-        other => Err(anyhow!(
-            "Unsupported faucet token selection `{other}`. Use `DGT`, `DRT`, or `both`."
-        )),
-    }
-}
-
-fn extract_balance_value(value: &Value, path: &[&str]) -> Option<u128> {
-    let mut current = value;
-    for key in path {
-        current = current.get(*key)?;
-    }
-    current
-        .as_str()
-        .and_then(|raw| raw.parse::<u128>().ok())
-        .or_else(|| current.as_u64().map(u128::from))
 }
 
 #[cfg(test)]
