@@ -275,6 +275,7 @@ dependencies = [
  "dytallix-core",
  "dytallix-sdk",
  "indicatif",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",

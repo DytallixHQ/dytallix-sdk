@@ -1,13 +1,505 @@
-// Implemented in Prompt D.
-pub mod init;
-pub mod wallet;
+//! Command modules and shared CLI helpers.
+
 pub mod balance;
-pub mod send;
-pub mod faucet;
-pub mod contract;
-pub mod stake;
-pub mod governance;
 pub mod chain;
+pub mod config;
+pub mod contract;
 pub mod crypto;
 pub mod dev;
-pub mod config;
+pub mod faucet;
+pub mod governance;
+pub mod init;
+pub mod node;
+pub mod send;
+pub mod stake;
+pub mod wallet;
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::{anyhow, Context, Result};
+use dytallix_core::address::DAddr;
+use dytallix_core::keypair::DytallixKeypair;
+use dytallix_sdk::client::DytallixClient;
+use dytallix_sdk::error::SdkError;
+use dytallix_sdk::faucet::FaucetClient;
+use dytallix_sdk::keystore::Keystore;
+use dytallix_sdk::{KeystoreEntry, Token};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+const TESTNET_ENDPOINT: &str = "https://testnet.dytallix.com";
+const LOCAL_ENDPOINT: &str = "http://localhost:8545";
+const MAINNET_ENDPOINT: &str = "https://mainnet.dytallix.com";
+const TESTNET_PUBLIC_API: &str = "https://dytallix.com/api";
+const TESTNET_FAUCET: &str = "https://faucet.dytallix.com";
+const LOCAL_FAUCET: &str = "http://localhost:3004";
+const DISCORD_LINK: &str = "https://discord.gg/eyVvu5kmPG";
+const EXPLORER_LINK: &str = "https://explorer.dytallix.com";
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub(crate) struct CliConfig {
+    pub(crate) network: NetworkProfile,
+    pub(crate) values: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum NetworkProfile {
+    #[default]
+    Testnet,
+    Mainnet,
+    Local,
+}
+
+impl std::fmt::Display for NetworkProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Testnet => f.write_str("testnet"),
+            Self::Mainnet => f.write_str("mainnet"),
+            Self::Local => f.write_str("local"),
+        }
+    }
+}
+
+pub(crate) async fn configured_client() -> Result<DytallixClient> {
+    let config = load_config()?;
+    let endpoint = network_endpoint(config.network);
+    DytallixClient::new(endpoint)
+        .await
+        .map_err(humanize_sdk_error)
+}
+
+pub(crate) fn configured_faucet() -> Result<FaucetClient> {
+    let config = load_config()?;
+    let endpoint = match config.network {
+        NetworkProfile::Testnet => TESTNET_FAUCET,
+        NetworkProfile::Local => LOCAL_FAUCET,
+        NetworkProfile::Mainnet => {
+            return Err(anyhow!(
+				"Faucet is not available on mainnet. Switch to testnet with `dytallix config network testnet`."
+			));
+        }
+    };
+
+    Ok(FaucetClient::new(endpoint))
+}
+
+pub(crate) fn faucet_endpoint(profile: NetworkProfile) -> Result<&'static str> {
+    match profile {
+        NetworkProfile::Testnet => Ok(TESTNET_FAUCET),
+        NetworkProfile::Local => Ok(LOCAL_FAUCET),
+        NetworkProfile::Mainnet => Err(anyhow!(
+            "Faucet is not available on mainnet. Switch to testnet with `dytallix config network testnet`."
+        )),
+    }
+}
+
+pub(crate) fn network_endpoint(profile: NetworkProfile) -> &'static str {
+    match profile {
+        NetworkProfile::Testnet => TESTNET_ENDPOINT,
+        NetworkProfile::Mainnet => MAINNET_ENDPOINT,
+        NetworkProfile::Local => LOCAL_ENDPOINT,
+    }
+}
+
+pub(crate) fn ensure_cli_dir() -> Result<PathBuf> {
+    let dir = home_dir().join(".dytallix");
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+pub(crate) fn config_path() -> PathBuf {
+    home_dir().join(".dytallix").join("config.json")
+}
+
+pub(crate) fn load_config() -> Result<CliConfig> {
+    let path = config_path();
+    if !path.exists() {
+        return Ok(CliConfig::default());
+    }
+
+    let contents = fs::read_to_string(&path)?;
+    serde_json::from_str(&contents)
+        .map_err(|err| anyhow!("Invalid CLI config at {}: {err}", display_path(&path)))
+}
+
+pub(crate) fn save_config(config: &CliConfig) -> Result<()> {
+    let path = config_path();
+    ensure_cli_dir()?;
+    let json = serde_json::to_string_pretty(config)?;
+    fs::write(path, json)?;
+    Ok(())
+}
+
+pub(crate) fn load_keystore() -> Result<Keystore> {
+    Keystore::open(Keystore::default_path()).map_err(map_keystore_error)
+}
+
+pub(crate) fn load_or_create_keystore() -> Result<Keystore> {
+    Keystore::open_or_create(Keystore::default_path()).map_err(map_keystore_error)
+}
+
+pub(crate) fn active_entry(keystore: &Keystore) -> Result<&KeystoreEntry> {
+    keystore.active().ok_or_else(|| {
+		anyhow!(
+			"No active wallet. Run `dytallix init` to create one, or `dytallix wallet switch NAME` to activate an existing wallet."
+		)
+	})
+}
+
+pub(crate) fn active_keypair(keystore: &Keystore) -> Result<DytallixKeypair> {
+    let entry = active_entry(keystore)?;
+    keystore
+        .get_keypair(&entry.name)
+        .map_err(humanize_sdk_error)
+}
+
+pub(crate) fn validate_address(raw: &str) -> Result<DAddr> {
+    DAddr::from_str(raw)
+        .map_err(|_| anyhow!("Invalid address: Bech32m checksum failed — check for typos."))
+}
+
+pub(crate) fn format_number(value: u128) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    let chars = digits.chars().rev().collect::<Vec<char>>();
+    for (index, ch) in chars.iter().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            out.push(',');
+        }
+        out.push(*ch);
+    }
+    out.chars().rev().collect()
+}
+
+pub(crate) fn display_path(path: &Path) -> String {
+    let home = home_dir();
+    if let Ok(stripped) = path.strip_prefix(&home) {
+        if stripped.as_os_str().is_empty() {
+            "~".to_owned()
+        } else {
+            format!("~/{}", stripped.display())
+        }
+    } else {
+        path.display().to_string()
+    }
+}
+
+pub(crate) fn short_address(address: &DAddr) -> String {
+    let prefix = address.as_str().chars().take(16).collect::<String>();
+    format!("{prefix}...")
+}
+
+pub(crate) fn read_bytes(path: &Path) -> Result<Vec<u8>> {
+    fs::read(path).with_context(|| format!("Failed to read {}", display_path(path)))
+}
+
+pub(crate) fn bytes_to_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
+}
+
+pub(crate) fn hex_to_bytes(raw: &str) -> Result<Vec<u8>> {
+    let trimmed = raw.trim();
+    if trimmed.len() % 2 != 0 {
+        return Err(anyhow!(
+            "Invalid hex input. Provide an even number of characters."
+        ));
+    }
+
+    let mut bytes = Vec::with_capacity(trimmed.len() / 2);
+    let chars = trimmed.as_bytes();
+    let mut index = 0usize;
+    while index < chars.len() {
+        let high = decode_hex_nibble(chars[index] as char)?;
+        let low = decode_hex_nibble(chars[index + 1] as char)?;
+        bytes.push((high << 4) | low);
+        index += 2;
+    }
+    Ok(bytes)
+}
+
+pub(crate) async fn raw_get_json(path: &str) -> Result<Value> {
+    let config = load_config()?;
+    let url = format!("{}{}", network_endpoint(config.network), path);
+    let response = reqwest::get(&url).await.map_err(|_| {
+        anyhow!("Cannot reach the Dytallix testnet at {url}. Check your network connection.")
+    })?;
+    if response.status().is_success() {
+        response
+            .json()
+            .await
+            .map_err(|err| anyhow!("Failed to decode response from {url}: {err}"))
+    } else {
+        let status = response.status();
+        let reason = response.text().await.unwrap_or_default();
+        Err(anyhow!(
+            "Request to {url} failed with status {status}. {reason}"
+        ))
+    }
+}
+
+pub(crate) async fn faucet_request(address: &DAddr, token_type: &str) -> Result<Value> {
+    let config = load_config()?;
+    let endpoint = faucet_endpoint(config.network)?;
+
+    let (url, body) = match config.network {
+        NetworkProfile::Testnet => {
+            let (dgt_amount, drt_amount) = faucet_amounts(token_type)?;
+            (
+                format!("{TESTNET_PUBLIC_API}/faucet/request"),
+                serde_json::json!({
+                    "address": address.as_str(),
+                    "dgt_amount": dgt_amount,
+                    "drt_amount": drt_amount,
+                }),
+            )
+        }
+        NetworkProfile::Local => (
+            format!("{endpoint}/api/faucet"),
+            serde_json::json!({
+                "address": address.as_str(),
+                "tokenType": token_type,
+            }),
+        ),
+        NetworkProfile::Mainnet => unreachable!("mainnet faucet is rejected earlier"),
+    };
+
+    let response = reqwest::Client::new()
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
+            )
+        })?;
+
+    if response.status().is_success() {
+        response
+            .json()
+            .await
+            .map_err(|err| anyhow!("Failed to decode faucet response from {endpoint}: {err}"))
+    } else {
+        Err(anyhow!(
+            "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
+        ))
+    }
+}
+
+pub(crate) async fn faucet_status() -> Result<Value> {
+    let config = load_config()?;
+    let endpoint = faucet_endpoint(config.network)?;
+    let url = match config.network {
+        NetworkProfile::Testnet => format!("{TESTNET_PUBLIC_API}/status"),
+        NetworkProfile::Local => format!("{endpoint}/api/status"),
+        NetworkProfile::Mainnet => unreachable!("mainnet faucet is rejected earlier"),
+    };
+    let response = reqwest::get(&url).await.map_err(|_| {
+        anyhow!(
+            "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
+        )
+    })?;
+
+    if response.status().is_success() {
+        response
+            .json()
+            .await
+            .map_err(|err| anyhow!("Failed to decode faucet response from {endpoint}: {err}"))
+    } else {
+        Err(anyhow!(
+            "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
+        ))
+    }
+}
+
+pub(crate) async fn faucet_balance(address: &DAddr) -> Result<dytallix_sdk::Balance> {
+    let config = load_config()?;
+    let endpoint = faucet_endpoint(config.network)?;
+    let url = match config.network {
+        NetworkProfile::Testnet => format!("{TESTNET_PUBLIC_API}/blockchain/balance/{address}"),
+        NetworkProfile::Local => format!("{endpoint}/api/balance/{address}"),
+        NetworkProfile::Mainnet => unreachable!("mainnet faucet is rejected earlier"),
+    };
+    let response = reqwest::get(&url).await.map_err(|_| {
+        anyhow!(
+            "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
+        )
+    })?;
+
+    if !response.status().is_success() {
+        return Err(anyhow!(
+            "Faucet is not reachable at {endpoint}. Check your network connection or try again later."
+        ));
+    }
+
+    let value: Value = response.json().await.map_err(|err| {
+        anyhow!("Failed to decode faucet balance response from {endpoint}: {err}")
+    })?;
+
+    Ok(dytallix_sdk::Balance {
+        dgt: extract_balance_value(&value, &["balances", "udgt", "balance"]).unwrap_or(0)
+            / 1_000_000,
+        drt: extract_balance_value(&value, &["balances", "udrt", "balance"]).unwrap_or(0)
+            / 1_000_000,
+    })
+}
+
+pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
+    match error {
+		SdkError::Core(_) => anyhow!("Invalid address: Bech32m checksum failed — check for typos."),
+		SdkError::InsufficientBalance {
+			token: Token::DRT,
+			required,
+			available,
+		} => anyhow!(
+			"Insufficient DRT for gas fees. Required: {} DRT. Available: {} DRT. Run dytallix faucet to get more.",
+			format_number(required),
+			format_number(available)
+		),
+		SdkError::InsufficientBalance {
+			token,
+			required,
+			available,
+		} => anyhow!(
+			"Insufficient balance for {token}. Required: {} {token}. Available: {} {token}.",
+			format_number(required),
+			format_number(available)
+		),
+		SdkError::FaucetRateLimited {
+			retry_after_seconds,
+		} => anyhow!("Faucet rate limit reached. Try again in {retry_after_seconds} seconds."),
+		SdkError::FaucetUnavailable { endpoint, .. } => anyhow!(
+			"Faucet is not reachable at {endpoint}. Check your network connection or try again later."
+		),
+		SdkError::NodeUnavailable { endpoint, .. } => anyhow!(
+			"Cannot reach the Dytallix testnet at {endpoint}. Check your network connection."
+		),
+		SdkError::KeystoreNotFound(_) => anyhow!(keystore_not_found_message()),
+		SdkError::Network(message) => anyhow!("Network error: {message}"),
+		SdkError::Io(err) => anyhow!("I/O error: {err}"),
+		SdkError::Serialization(message) => anyhow!("Serialization error: {message}"),
+		SdkError::TransactionRejected(message) => anyhow!("Transaction rejected: {message}"),
+		SdkError::ContractDeployFailed(message) => anyhow!("Contract deployment failed: {message}"),
+		SdkError::KeystoreCorrupt(message) => anyhow!("Keystore corrupt: {message}"),
+		SdkError::NetworkMismatch(message) => anyhow!("Network mismatch: {message}"),
+		SdkError::InsufficientGas { required, provided } => anyhow!(
+			"Insufficient gas: required {required} units but only {provided} were provided. Increase the gas limit and try again."
+		),
+	}
+}
+
+pub(crate) fn map_keystore_error(error: SdkError) -> anyhow::Error {
+    match error {
+        SdkError::KeystoreNotFound(_) => anyhow!(keystore_not_found_message()),
+        other => humanize_sdk_error(other),
+    }
+}
+
+pub(crate) fn keystore_not_found_message() -> &'static str {
+    "No keystore found at ~/.dytallix/keystore.json. Run dytallix init to create one."
+}
+
+pub(crate) fn faucet_balance_timeout(address: &DAddr) -> anyhow::Error {
+    anyhow!(
+		"Faucet request submitted but balance not confirmed after 45 seconds. Check the explorer at {EXPLORER_LINK} for address {address}. Join Discord at {DISCORD_LINK} if the problem persists."
+	)
+}
+
+pub(crate) fn open_url(url: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    let command = ("open", vec![url]);
+    #[cfg(target_os = "linux")]
+    let command = ("xdg-open", vec![url]);
+    #[cfg(target_os = "windows")]
+    let command = ("cmd", vec!["/C", "start", url]);
+
+    let status = std::process::Command::new(command.0)
+        .args(command.1)
+        .status()
+        .with_context(|| format!("Failed to open {url}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "Failed to open {url}. Open it manually in your browser."
+        ))
+    }
+}
+
+fn home_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn decode_hex_nibble(ch: char) -> Result<u8> {
+    match ch {
+        '0'..='9' => Ok((ch as u8) - b'0'),
+        'a'..='f' => Ok((ch as u8) - b'a' + 10),
+        'A'..='F' => Ok((ch as u8) - b'A' + 10),
+        _ => Err(anyhow!("Invalid hex input. `{ch}` is not a hex character.")),
+    }
+}
+
+fn faucet_amounts(token_type: &str) -> Result<(u64, u64)> {
+    match token_type.to_ascii_lowercase().as_str() {
+        "both" => Ok((1_000, 10_000)),
+        "dgt" => Ok((1_000, 0)),
+        "drt" => Ok((0, 10_000)),
+        other => Err(anyhow!(
+            "Unsupported faucet token selection `{other}`. Use `DGT`, `DRT`, or `both`."
+        )),
+    }
+}
+
+fn extract_balance_value(value: &Value, path: &[&str]) -> Option<u128> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    current
+        .as_str()
+        .and_then(|raw| raw.parse::<u128>().ok())
+        .or_else(|| current.as_u64().map(u128::from))
+}
+
+#[cfg(test)]
+mod tests {
+    use dytallix_sdk::error::SdkError;
+
+    use super::{faucet_balance_timeout, humanize_sdk_error, keystore_not_found_message};
+    use dytallix_core::address::DAddr;
+    use dytallix_core::keypair::DytallixKeypair;
+
+    #[test]
+    fn error_messages_are_correct() {
+        let rate_limited = humanize_sdk_error(SdkError::FaucetRateLimited {
+            retry_after_seconds: 17,
+        })
+        .to_string();
+        assert!(rate_limited.contains("Try again in 17 seconds"));
+
+        let node_unavailable = humanize_sdk_error(SdkError::NodeUnavailable {
+            endpoint: "https://testnet.dytallix.com".to_owned(),
+            reason: "offline".to_owned(),
+        })
+        .to_string();
+        assert!(node_unavailable.contains("Check your network connection"));
+
+        assert!(keystore_not_found_message().contains("Run dytallix init"));
+
+        let address = DAddr::from_public_key(DytallixKeypair::generate().public_key()).unwrap();
+        let timeout = faucet_balance_timeout(&address).to_string();
+        assert!(timeout.contains("discord.gg/eyVvu5kmPG"));
+    }
+}

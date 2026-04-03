@@ -10,6 +10,10 @@ license.workspace = true
 name = "dytallix"
 path = "src/main.rs"
 
+[[example]]
+name = "deploy-contract"
+path = "../../examples/deploy-contract.rs"
+
 [dependencies]
 dytallix-core = { path = "../dytallix-core" }
 dytallix-sdk = { path = "../dytallix-sdk" }
@@ -20,3 +24,4 @@ colored = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+reqwest = { workspace = true }
