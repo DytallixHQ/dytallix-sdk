@@ -9,7 +9,7 @@ async fn main() -> anyhow::Result<()> {
     let keystore = Keystore::open(Keystore::default_path())?;
     let entry = keystore.active().ok_or_else(|| {
         anyhow::anyhow!(
-            "No active wallet. Run dytallix init first.\nDiscord: https://discord.gg/eyVvu5kmPG"
+            "No active wallet. Run dytallix init first.\nDiscord: https://discord.com/invite/eyVvu5kmPG"
         )
     })?;
     println!("Deploying from: {}", entry.address);

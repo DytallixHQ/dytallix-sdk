@@ -53,7 +53,7 @@ pub async fn run(args: DevArgs) -> Result<()> {
         DevCommand::FaucetServer => faucet_server(),
         DevCommand::Explorer => open_url("https://explorer.dytallix.com"),
         DevCommand::Docs => open_url("https://dytallix.com/docs"),
-        DevCommand::Discord => open_url("https://discord.gg/eyVvu5kmPG"),
+        DevCommand::Discord => open_url("https://discord.com/invite/eyVvu5kmPG"),
         DevCommand::Github => open_url("https://github.com/DytallixHQ"),
         DevCommand::Decode { hex } => decode(hex),
         DevCommand::Encode { text } => encode(text),
