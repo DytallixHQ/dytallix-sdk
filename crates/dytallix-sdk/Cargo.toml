@@ -6,6 +6,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[[example]]
+name = "first-transaction"
+path = "../../examples/first-transaction.rs"
+
 [dependencies]
 dytallix-core = { path = "../dytallix-core" }
 tokio = { workspace = true }
