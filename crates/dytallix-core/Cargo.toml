@@ -6,6 +6,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[[example]]
+name = "first-keypair"
+path = "../../examples/first-keypair.rs"
+
 [dependencies]
 pqcrypto-dilithium = { workspace = true }
 pqcrypto-sphincsplus = { workspace = true }
