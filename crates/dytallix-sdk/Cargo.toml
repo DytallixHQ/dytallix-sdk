@@ -1,0 +1,17 @@
+[package]
+name = "dytallix-sdk"
+description = "SDK for building on the Dytallix PQC-native blockchain"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+dytallix-core = { path = "../dytallix-core" }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+futures = { workspace = true }

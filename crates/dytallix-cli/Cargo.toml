@@ -1,0 +1,22 @@
+[package]
+name = "dytallix-cli"
+description = "CLI for the Dytallix PQC-native blockchain testnet"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dytallix"
+path = "src/main.rs"
+
+[dependencies]
+dytallix-core = { path = "../dytallix-core" }
+dytallix-sdk = { path = "../dytallix-sdk" }
+tokio = { workspace = true }
+clap = { workspace = true }
+indicatif = { workspace = true }
+colored = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }

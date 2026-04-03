@@ -1,0 +1,16 @@
+[package]
+name = "dytallix-core"
+description = "Cryptographic primitives for the Dytallix PQC-native blockchain"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+pqcrypto-dilithium = { workspace = true }
+pqcrypto-sphincsplus = { workspace = true }
+pqcrypto-traits = { workspace = true }
+blake3 = { workspace = true }
+bech32 = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
