@@ -267,7 +267,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "dytallix-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -283,7 +283,7 @@ dependencies = [
 
 [[package]]
 name = "dytallix-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bech32",
  "blake3",
@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "dytallix-sdk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "dytallix-core",
