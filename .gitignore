@@ -6,3 +6,5 @@ Cargo.lock
 *.key
 *.pem
 ~/.dytallix/
+.DS_Store
+dist/
