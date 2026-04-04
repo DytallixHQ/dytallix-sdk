@@ -24,6 +24,15 @@ Only PQC-native accounts are supported. No hybrid mode. No legacy accounts.
 - dytallix-sdk — in progress
 - dytallix-cli — in progress
 
+## Download
+
+- GitHub Releases: https://github.com/DytallixHQ/dytallix-sdk/releases
+- Build from source: `cargo build --release --bin dytallix`
+- Install from GitHub: `cargo install --git https://github.com/DytallixHQ/dytallix-sdk.git dytallix-cli --bin dytallix`
+
+Release tags matching `v*` build downloadable CLI archives for Linux, macOS
+(Intel and Apple Silicon), and Windows through GitHub Actions.
+
 ## DytallixHQ Repositories
 
 - dytallix-sdk — this repository
