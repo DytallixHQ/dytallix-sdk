@@ -1,15 +1,20 @@
 //! Asynchronous HTTP client for Dytallix node APIs.
 
+use std::collections::BTreeMap;
+
 use reqwest::Url;
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 
 use crate::error::SdkError;
 use crate::transaction::{SignedTransaction, Transaction};
 use crate::{
     AccountState, Balance, Block, BlockId, ChainStatus, Delegation, FeeEstimate,
-    TransactionReceipt, Validator,
+    TransactionReceipt, TransactionStatus, Validator,
 };
 use dytallix_core::address::DAddr;
+
+const DEFAULT_PUBLIC_MIN_GAS_PRICE: u64 = 1_000;
 
 /// Asynchronous client for interacting with Dytallix nodes.
 #[derive(Debug, Clone)]
@@ -34,33 +39,40 @@ impl DytallixClient {
 
     /// Creates a client for the canonical Dytallix testnet node.
     pub async fn testnet() -> Result<Self, SdkError> {
-        Self::new("https://testnet.dytallix.com").await
+        Self::new("https://dytallix.com").await
     }
 
     /// Creates a client for a local Dytallix node.
     pub async fn local() -> Result<Self, SdkError> {
-        Self::new("http://localhost:8545").await
+        Self::new("http://localhost:3030").await
     }
 
     /// Fetches the current account state for the provided address.
     pub async fn get_account(&self, address: &DAddr) -> Result<AccountState, SdkError> {
-        self.get_json(&format!("/v1/accounts/{address}")).await
+        let account: AccountResponse = self.get_json(&format!("/account/{address}")).await?;
+
+        Ok(AccountState {
+            address: address.clone(),
+            pubkey_hash: [0; 32],
+            balance: account.balances,
+            nonce: account.nonce,
+            key_scheme: crate::KeyScheme::MlDsa65,
+        })
     }
 
     /// Fetches the current token balances for the provided address.
     pub async fn get_balance(&self, address: &DAddr) -> Result<Balance, SdkError> {
-        self.get_account(address)
-            .await
-            .map(|account| account.balance)
+        let balance: BalanceResponse = self.get_json(&format!("/balance/{address}")).await?;
+        Ok(balance.balances)
     }
 
     /// Fetches a block by number, hash, or chain-relative identifier.
     pub async fn get_block(&self, id: BlockId) -> Result<Block, SdkError> {
         let path = match id {
-            BlockId::Number(number) => format!("/v1/blocks/{number}"),
-            BlockId::Hash(hash) => format!("/v1/blocks/{hash}"),
-            BlockId::Latest => "/v1/blocks/latest".to_owned(),
-            BlockId::Finalized => "/v1/blocks/finalized".to_owned(),
+            BlockId::Number(number) => format!("/block/{number}"),
+            BlockId::Hash(hash) => format!("/block/{hash}"),
+            BlockId::Latest => "/blocks".to_owned(),
+            BlockId::Finalized => "/blocks".to_owned(),
         };
 
         self.get_json(&path).await
@@ -68,12 +80,19 @@ impl DytallixClient {
 
     /// Fetches a transaction receipt by hash.
     pub async fn get_transaction(&self, hash: &str) -> Result<TransactionReceipt, SdkError> {
-        self.get_json(&format!("/v1/transactions/{hash}")).await
+        let receipt: TransactionReceiptResponse = self.get_json(&format!("/tx/{hash}")).await?;
+        Ok(receipt.into())
     }
 
     /// Fetches the current chain status.
     pub async fn get_chain_status(&self) -> Result<ChainStatus, SdkError> {
-        self.get_json("/v1/chain/status").await
+        let status: ChainStatusResponse = self.get_json("/status").await?;
+        Ok(ChainStatus {
+            block_height: status.latest_height,
+            epoch: 0,
+            slot: 0,
+            finalized_checkpoint: status.chain_id,
+        })
     }
 
     /// Submits a signed transaction to the node and returns its receipt.
@@ -81,11 +100,11 @@ impl DytallixClient {
         &self,
         tx: &SignedTransaction,
     ) -> Result<TransactionReceipt, SdkError> {
-        let url = self.url("/v1/transactions")?;
+        let url = self.url("/api/blockchain/submit")?;
         let response = self
             .http
             .post(url.clone())
-            .json(tx)
+            .json(&SubmitTransactionBody { signed_tx: tx })
             .send()
             .await
             .map_err(|err| SdkError::NodeUnavailable {
@@ -94,7 +113,14 @@ impl DytallixClient {
             })?;
 
         if response.status().is_success() {
-            response.json().await.map_err(serialization_error)
+            let submitted: SubmittedTransaction =
+                response.json().await.map_err(serialization_error)?;
+            Ok(TransactionReceipt {
+                hash: submitted.hash,
+                block: 0,
+                status: map_transaction_status(&submitted.status, None),
+                fee: tx.fee_breakdown().unwrap_or_else(|| tx.tx.fee_estimate()),
+            })
         } else {
             let reason = response
                 .text()
@@ -106,7 +132,8 @@ impl DytallixClient {
 
     /// Requests a fee simulation for an unsigned transaction.
     pub async fn simulate_transaction(&self, tx: &Transaction) -> Result<FeeEstimate, SdkError> {
-        self.post_json("/v1/transactions/simulate", tx).await
+        let gas = self.get_network_gas_params().await?;
+        Ok(tx.fee_estimate_with_gas_price(gas.min_gas_price))
     }
 
     /// Fetches the active validator set.
@@ -148,40 +175,17 @@ impl DytallixClient {
         }
     }
 
-    async fn post_json<T, B>(&self, path: &str, body: &B) -> Result<T, SdkError>
-    where
-        T: DeserializeOwned,
-        B: serde::Serialize + ?Sized,
-    {
-        let url = self.url(path)?;
-        let response = self
-            .http
-            .post(url.clone())
-            .json(body)
-            .send()
-            .await
-            .map_err(|err| SdkError::NodeUnavailable {
-                endpoint: url.to_string(),
-                reason: err.to_string(),
-            })?;
-
-        if response.status().is_success() {
-            response.json().await.map_err(serialization_error)
-        } else {
-            let reason = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "request failed".to_owned());
-            Err(SdkError::NodeUnavailable {
-                endpoint: url.to_string(),
-                reason,
-            })
-        }
-    }
-
     fn url(&self, path: &str) -> Result<Url, SdkError> {
         let joined = format!("{}{}", self.endpoint, path);
         Url::parse(&joined).map_err(|err| SdkError::Network(err.to_string()))
+    }
+
+    async fn get_network_gas_params(&self) -> Result<NetworkGasParams, SdkError> {
+        let status: ChainStatusResponse = self.get_json("/status").await?;
+        let gas = status.gas.unwrap_or_default();
+        Ok(NetworkGasParams {
+            min_gas_price: gas.min_gas_price.max(DEFAULT_PUBLIC_MIN_GAS_PRICE),
+        })
     }
 }
 
@@ -196,4 +200,162 @@ fn normalize_endpoint(endpoint: &str) -> Result<String, SdkError> {
 
 fn serialization_error(err: reqwest::Error) -> SdkError {
     SdkError::Serialization(err.to_string())
+}
+
+fn map_transaction_status(status: &str, error: Option<String>) -> TransactionStatus {
+    match status.to_ascii_lowercase().as_str() {
+        "pending" => TransactionStatus::Pending,
+        "success" | "confirmed" => TransactionStatus::Confirmed,
+        _ => TransactionStatus::Failed(
+            error.unwrap_or_else(|| format!("transaction failed with status `{status}`")),
+        ),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct AccountResponse {
+    #[serde(default = "default_balance", deserialize_with = "deserialize_balances")]
+    balances: Balance,
+    #[serde(default)]
+    nonce: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct BalanceResponse {
+    #[serde(default = "default_balance", deserialize_with = "deserialize_balances")]
+    balances: Balance,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ChainStatusResponse {
+    chain_id: String,
+    latest_height: u64,
+    #[serde(default)]
+    gas: Option<ChainGasResponse>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+struct ChainGasResponse {
+    #[serde(default)]
+    min_gas_price: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NetworkGasParams {
+    min_gas_price: u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SubmitTransactionBody<'a> {
+    signed_tx: &'a SignedTransaction,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SubmittedTransaction {
+    hash: String,
+    status: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TransactionReceiptResponse {
+    #[serde(rename = "tx_hash")]
+    hash: String,
+    #[serde(
+        rename = "block_height",
+        default,
+        deserialize_with = "deserialize_u64_or_default"
+    )]
+    block: u64,
+    status: String,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_u128_string")]
+    fee: u128,
+}
+
+impl From<TransactionReceiptResponse> for TransactionReceipt {
+    fn from(value: TransactionReceiptResponse) -> Self {
+        Self {
+            hash: value.hash,
+            block: value.block,
+            status: map_transaction_status(&value.status, value.error),
+            fee: FeeEstimate {
+                c_gas: 0,
+                c_gas_cost_drt: 0,
+                b_gas: 0,
+                b_gas_cost_drt: value.fee,
+                total_cost_drt: value.fee,
+            },
+        }
+    }
+}
+
+fn deserialize_balances<'de, D>(deserializer: D) -> Result<Balance, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let balances =
+        <BTreeMap<String, serde_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(Balance {
+        dgt: decode_micro_balance(&balances, "udgt"),
+        drt: decode_micro_balance(&balances, "udrt"),
+    })
+}
+
+fn default_balance() -> Balance {
+    Balance { dgt: 0, drt: 0 }
+}
+
+fn decode_micro_balance(balances: &BTreeMap<String, serde_json::Value>, denom: &str) -> u128 {
+    match balances.get(denom) {
+        Some(serde_json::Value::Number(number)) => {
+            number.as_u64().map(u128::from).unwrap_or(0) / 1_000_000
+        }
+        Some(serde_json::Value::String(value)) => value.parse::<u128>().unwrap_or(0) / 1_000_000,
+        Some(serde_json::Value::Object(value)) => {
+            value
+                .get("balance")
+                .and_then(|amount| match amount {
+                    serde_json::Value::Number(number) => number.as_u64().map(u128::from),
+                    serde_json::Value::String(raw) => raw.parse::<u128>().ok(),
+                    _ => None,
+                })
+                .unwrap_or(0)
+                / 1_000_000
+        }
+        _ => 0,
+    }
+}
+
+fn deserialize_u128_string<'de, D>(deserializer: D) -> Result<u128, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(raw) => raw.parse::<u128>().map_err(serde::de::Error::custom),
+        serde_json::Value::Number(number) => number
+            .as_u64()
+            .map(u128::from)
+            .ok_or_else(|| serde::de::Error::custom("invalid numeric fee value")),
+        serde_json::Value::Null => Ok(0),
+        other => Err(serde::de::Error::custom(format!(
+            "unexpected fee value: {other}"
+        ))),
+    }
+}
+
+fn deserialize_u64_or_default<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Null => Ok(0),
+        serde_json::Value::Number(number) => number
+            .as_u64()
+            .ok_or_else(|| serde::de::Error::custom("invalid numeric u64 value")),
+        serde_json::Value::String(raw) => raw.parse::<u64>().map_err(serde::de::Error::custom),
+        other => Err(serde::de::Error::custom(format!(
+            "unexpected u64 value: {other}"
+        ))),
+    }
 }

@@ -29,10 +29,10 @@ use dytallix_sdk::{FaucetStatus, KeystoreEntry, Token};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const TESTNET_ENDPOINT: &str = "https://testnet.dytallix.com";
+const TESTNET_ENDPOINT: &str = "https://dytallix.com";
 const LOCAL_ENDPOINT: &str = "http://localhost:8545";
 const MAINNET_ENDPOINT: &str = "https://mainnet.dytallix.com";
-const TESTNET_FAUCET: &str = "https://faucet.dytallix.com";
+const TESTNET_FAUCET: &str = "https://dytallix.com/api/faucet";
 const LOCAL_FAUCET: &str = "http://localhost:3004";
 const DISCORD_LINK: &str = "https://discord.gg/eyVvu5kmPG";
 const EXPLORER_LINK: &str = "https://explorer.dytallix.com";
@@ -308,6 +308,10 @@ pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
 		SdkError::FaucetUnavailable { endpoint, .. } => anyhow!(
 			"Faucet is not reachable at {endpoint}. Check your network connection or try again later."
 		),
+		SdkError::NodeUnavailable { endpoint, reason }
+            if transaction_api_unavailable(&endpoint, &reason) => anyhow!(
+            "The Dytallix testnet transaction API is not available at {endpoint}. Faucet and balance reads may still work, but transaction simulation and submission are not exposed from this endpoint yet."
+        ),
 		SdkError::NodeUnavailable { endpoint, .. } => anyhow!(
 			"Cannot reach the Dytallix testnet at {endpoint}. Check your network connection."
 		),
@@ -315,6 +319,9 @@ pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
 		SdkError::Network(message) => anyhow!("Network error: {message}"),
 		SdkError::Io(err) => anyhow!("I/O error: {err}"),
 		SdkError::Serialization(message) => anyhow!("Serialization error: {message}"),
+		SdkError::TransactionRejected(message) if looks_like_gateway_html(&message) => anyhow!(
+            "The Dytallix testnet transaction API returned a gateway or HTML response instead of transaction JSON. Transaction submission is not usable from the current endpoint."
+        ),
 		SdkError::TransactionRejected(message) => anyhow!("Transaction rejected: {message}"),
 		SdkError::ContractDeployFailed(message) => anyhow!("Contract deployment failed: {message}"),
 		SdkError::KeystoreCorrupt(message) => anyhow!("Keystore corrupt: {message}"),
@@ -323,6 +330,21 @@ pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
 			"Insufficient gas: required {required} units but only {provided} were provided. Increase the gas limit and try again."
 		),
 	}
+}
+
+fn transaction_api_unavailable(endpoint: &str, reason: &str) -> bool {
+    let lower_reason = reason.to_ascii_lowercase();
+    (endpoint.contains("/transactions") || endpoint.contains("/simulate"))
+        && (lower_reason.contains("405 not allowed")
+            || lower_reason.contains("404 not found")
+            || lower_reason.contains("cannot post")
+            || lower_reason.contains("<html")
+            || lower_reason.contains("<!doctype html"))
+}
+
+fn looks_like_gateway_html(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("<html") || lower.contains("<!doctype html")
 }
 
 pub(crate) fn map_keystore_error(error: SdkError) -> anyhow::Error {
@@ -396,11 +418,18 @@ mod tests {
         assert!(rate_limited.contains("Try again in 17 seconds"));
 
         let node_unavailable = humanize_sdk_error(SdkError::NodeUnavailable {
-            endpoint: "https://testnet.dytallix.com".to_owned(),
+            endpoint: "https://dytallix.com".to_owned(),
             reason: "offline".to_owned(),
         })
         .to_string();
         assert!(node_unavailable.contains("Check your network connection"));
+
+        let tx_api_unavailable = humanize_sdk_error(SdkError::NodeUnavailable {
+            endpoint: "https://dytallix.com/v1/transactions/simulate".to_owned(),
+            reason: "<html><h1>405 Not Allowed</h1></html>".to_owned(),
+        })
+        .to_string();
+        assert!(tx_api_unavailable.contains("transaction API is not available"));
 
         assert!(keystore_not_found_message().contains("Run dytallix init"));
 

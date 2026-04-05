@@ -7,15 +7,27 @@ authors.workspace = true
 license.workspace = true
 
 [[example]]
+name = "first-keypair"
+path = "../../examples/first-keypair.rs"
+
+[[example]]
 name = "first-transaction"
 path = "../../examples/first-transaction.rs"
+required-features = ["network"]
+
+[features]
+default = []
+network = ["dep:reqwest"]
 
 [dependencies]
+base64 = "0.22"
 dytallix-core = { path = "../dytallix-core" }
-tokio = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha3 = "0.10"
 thiserror = { workspace = true }
+
+[dev-dependencies]
 anyhow = { workspace = true }
-futures = { workspace = true }
+tokio = { workspace = true }

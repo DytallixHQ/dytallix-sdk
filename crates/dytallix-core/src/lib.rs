@@ -53,14 +53,17 @@ mod tests {
     }
 
     #[test]
-    fn deterministic_signing() {
+    fn repeat_signing_stays_verifiable() {
         let keypair = DytallixKeypair::generate();
         let message = b"deterministic dytallix signing";
 
         let signature_a = keypair.sign(message).unwrap();
         let signature_b = keypair.sign(message).unwrap();
 
-        assert_eq!(signature_a, signature_b);
+        assert_eq!(signature_a.len(), 3_309);
+        assert_eq!(signature_b.len(), 3_309);
+        assert!(verify_mldsa65(keypair.public_key(), message, &signature_a).unwrap());
+        assert!(verify_mldsa65(keypair.public_key(), message, &signature_b).unwrap());
     }
 
     #[test]
