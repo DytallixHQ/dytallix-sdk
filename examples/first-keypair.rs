@@ -1,9 +1,7 @@
 //! Generate your first ML-DSA-65 keypair and derive a Dytallix address.
 //! Run with: cargo run --example first-keypair
 
-use dytallix_core::address::DAddr;
-use dytallix_core::keypair::DytallixKeypair;
-use dytallix_core::signature::verify_mldsa65;
+use dytallix_sdk::{verify_mldsa65, DAddr, DytallixKeypair};
 
 fn main() {
     println!("Generating ML-DSA-65 keypair...");

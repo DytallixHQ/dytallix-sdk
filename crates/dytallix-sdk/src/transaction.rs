@@ -4,6 +4,7 @@ use dytallix_core::address::DAddr;
 use dytallix_core::hash::blake3_hash;
 use dytallix_core::keypair::DytallixKeypair;
 
+#[cfg(feature = "network")]
 use crate::client::DytallixClient;
 use crate::error::SdkError;
 use crate::{FeeEstimate, KeyScheme, Token};
@@ -138,6 +139,7 @@ impl Transaction {
     }
 
     /// Requests a fee estimate for this transaction from the provided client.
+    #[cfg(feature = "network")]
     pub async fn estimate_fee(&self, client: &DytallixClient) -> Result<FeeEstimate, SdkError> {
         client.simulate_transaction(self).await
     }

@@ -1,5 +1,7 @@
 //! Asynchronous HTTP client for Dytallix node APIs.
 
+use std::collections::BTreeMap;
+
 use reqwest::Url;
 use serde::de::DeserializeOwned;
 
@@ -34,7 +36,7 @@ impl DytallixClient {
 
     /// Creates a client for the canonical Dytallix testnet node.
     pub async fn testnet() -> Result<Self, SdkError> {
-        Self::new("https://testnet.dytallix.com").await
+        Self::new("https://dytallix.com").await
     }
 
     /// Creates a client for a local Dytallix node.
@@ -44,23 +46,30 @@ impl DytallixClient {
 
     /// Fetches the current account state for the provided address.
     pub async fn get_account(&self, address: &DAddr) -> Result<AccountState, SdkError> {
-        self.get_json(&format!("/v1/accounts/{address}")).await
+        let account: AccountResponse = self.get_json(&format!("/account/{address}")).await?;
+
+        Ok(AccountState {
+            address: address.clone(),
+            pubkey_hash: [0; 32],
+            balance: account.balances,
+            nonce: account.nonce,
+            key_scheme: crate::KeyScheme::MlDsa65,
+        })
     }
 
     /// Fetches the current token balances for the provided address.
     pub async fn get_balance(&self, address: &DAddr) -> Result<Balance, SdkError> {
-        self.get_account(address)
-            .await
-            .map(|account| account.balance)
+        let balance: BalanceResponse = self.get_json(&format!("/balance/{address}")).await?;
+        Ok(balance.balances)
     }
 
     /// Fetches a block by number, hash, or chain-relative identifier.
     pub async fn get_block(&self, id: BlockId) -> Result<Block, SdkError> {
         let path = match id {
-            BlockId::Number(number) => format!("/v1/blocks/{number}"),
-            BlockId::Hash(hash) => format!("/v1/blocks/{hash}"),
-            BlockId::Latest => "/v1/blocks/latest".to_owned(),
-            BlockId::Finalized => "/v1/blocks/finalized".to_owned(),
+            BlockId::Number(number) => format!("/block/{number}"),
+            BlockId::Hash(hash) => format!("/block/{hash}"),
+            BlockId::Latest => "/blocks".to_owned(),
+            BlockId::Finalized => "/blocks".to_owned(),
         };
 
         self.get_json(&path).await
@@ -68,12 +77,18 @@ impl DytallixClient {
 
     /// Fetches a transaction receipt by hash.
     pub async fn get_transaction(&self, hash: &str) -> Result<TransactionReceipt, SdkError> {
-        self.get_json(&format!("/v1/transactions/{hash}")).await
+        self.get_json(&format!("/tx/{hash}")).await
     }
 
     /// Fetches the current chain status.
     pub async fn get_chain_status(&self) -> Result<ChainStatus, SdkError> {
-        self.get_json("/v1/chain/status").await
+        let status: ChainStatusResponse = self.get_json("/status").await?;
+        Ok(ChainStatus {
+            block_height: status.latest_height,
+            epoch: 0,
+            slot: 0,
+            finalized_checkpoint: status.chain_id,
+        })
     }
 
     /// Submits a signed transaction to the node and returns its receipt.
@@ -196,4 +211,61 @@ fn normalize_endpoint(endpoint: &str) -> Result<String, SdkError> {
 
 fn serialization_error(err: reqwest::Error) -> SdkError {
     SdkError::Serialization(err.to_string())
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct AccountResponse {
+    #[serde(default = "default_balance", deserialize_with = "deserialize_balances")]
+    balances: Balance,
+    #[serde(default)]
+    nonce: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct BalanceResponse {
+    #[serde(default = "default_balance", deserialize_with = "deserialize_balances")]
+    balances: Balance,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ChainStatusResponse {
+    chain_id: String,
+    latest_height: u64,
+}
+
+fn deserialize_balances<'de, D>(deserializer: D) -> Result<Balance, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let balances =
+        <BTreeMap<String, serde_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(Balance {
+        dgt: decode_micro_balance(&balances, "udgt"),
+        drt: decode_micro_balance(&balances, "udrt"),
+    })
+}
+
+fn default_balance() -> Balance {
+    Balance { dgt: 0, drt: 0 }
+}
+
+fn decode_micro_balance(balances: &BTreeMap<String, serde_json::Value>, denom: &str) -> u128 {
+    match balances.get(denom) {
+        Some(serde_json::Value::Number(number)) => {
+            number.as_u64().map(u128::from).unwrap_or(0) / 1_000_000
+        }
+        Some(serde_json::Value::String(value)) => value.parse::<u128>().unwrap_or(0) / 1_000_000,
+        Some(serde_json::Value::Object(value)) => {
+            value
+                .get("balance")
+                .and_then(|amount| match amount {
+                    serde_json::Value::Number(number) => number.as_u64().map(u128::from),
+                    serde_json::Value::String(raw) => raw.parse::<u128>().ok(),
+                    _ => None,
+                })
+                .unwrap_or(0)
+                / 1_000_000
+        }
+        _ => 0,
+    }
 }

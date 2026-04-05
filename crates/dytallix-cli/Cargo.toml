@@ -16,7 +16,7 @@ path = "../../examples/deploy-contract.rs"
 
 [dependencies]
 dytallix-core = { path = "../dytallix-core" }
-dytallix-sdk = { path = "../dytallix-sdk" }
+dytallix-sdk = { path = "../dytallix-sdk", features = ["network"] }
 tokio = { workspace = true }
 clap = { workspace = true }
 indicatif = { workspace = true }

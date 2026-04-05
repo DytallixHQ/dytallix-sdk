@@ -3,6 +3,7 @@
 
 use dytallix_core::keypair::DytallixKeypair;
 use dytallix_sdk::client::DytallixClient;
+use dytallix_sdk::error::SdkError;
 use dytallix_sdk::faucet::FaucetClient;
 use dytallix_sdk::transaction::TransactionBuilder;
 use dytallix_sdk::Token;
@@ -25,12 +26,35 @@ async fn main() -> anyhow::Result<()> {
         .amount(1, Token::DRT)
         .nonce(account.nonce)
         .build()?;
-    let fee = tx.estimate_fee(&client).await?;
+    let fee = tx
+        .estimate_fee(&client)
+        .await
+        .map_err(humanize_transaction_error)?;
     println!("{fee}");
 
     let signed = tx.sign(&keypair)?;
-    let receipt = client.submit_transaction(&signed).await?;
+    let receipt = client
+        .submit_transaction(&signed)
+        .await
+        .map_err(humanize_transaction_error)?;
     println!("Transaction: {}", receipt.hash);
     println!("Status: {:?}", receipt.status);
     Ok(())
+}
+
+fn humanize_transaction_error(error: SdkError) -> anyhow::Error {
+    match error {
+        SdkError::NodeUnavailable { endpoint, reason }
+            if endpoint.contains("/transactions")
+                && (reason.contains("405 Not Allowed")
+                    || reason.contains("404 Not Found")
+                    || reason.contains("<html")
+                    || reason.contains("<!DOCTYPE html")) =>
+        {
+            anyhow::anyhow!(
+                "The Dytallix testnet transaction API is not available at {endpoint}. Faucet funding worked, but transaction simulation or submission is not exposed from the current public endpoint."
+            )
+        }
+        other => anyhow::anyhow!(other.to_string()),
+    }
 }

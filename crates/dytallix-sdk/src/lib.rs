@@ -1,20 +1,22 @@
-//! Network client, transaction builder, faucet client, and keystore support
-//! for Dytallix.
+//! Keypair, address, transaction, optional network client, faucet client, and
+//! keystore support for Dytallix.
 //!
 //! The SDK models the canonical two-token system used by the Dytallix chain:
 //! DGT for governance and delegation, and DRT for gas fees and rewards.
 
+#[cfg(feature = "network")]
 pub mod client;
 pub mod error;
+#[cfg(feature = "network")]
 pub mod faucet;
 pub mod keystore;
 pub mod transaction;
 
 use std::fmt;
 
-use dytallix_core::address::DAddr;
-
-pub use dytallix_core::keypair::KeyScheme;
+pub use dytallix_core::address::DAddr;
+pub use dytallix_core::keypair::{DytallixKeypair, KeyScheme};
+pub use dytallix_core::signature::verify_mldsa65;
 pub use error::SdkError;
 
 /// The two canonical Dytallix tokens.
@@ -242,12 +244,9 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use dytallix_core::address::DAddr;
-    use dytallix_core::keypair::DytallixKeypair;
-
     use crate::keystore::Keystore;
     use crate::transaction::TransactionBuilder;
-    use crate::{Balance, FeeEstimate, Token};
+    use crate::{Balance, DAddr, DytallixKeypair, FeeEstimate, Token};
 
     #[test]
     fn balance_display() {
@@ -277,6 +276,13 @@ mod tests {
     fn transaction_builder_validation() {
         let result = TransactionBuilder::new().build();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn sdk_surface_exposes_keypair_and_address() {
+        let keypair = DytallixKeypair::generate();
+        let address = DAddr::from_public_key(keypair.public_key()).unwrap();
+        assert!(address.as_str().starts_with("dytallix1"));
     }
 
     #[test]
