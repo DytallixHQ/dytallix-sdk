@@ -85,7 +85,10 @@ async fn deploy(wasm_file: PathBuf) -> Result<()> {
         .data(data)
         .build()
         .map_err(|err| anyhow!(err.to_string()))?;
-    let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
+    let (tx, fee) = tx
+        .with_estimated_fee(&client)
+        .await
+        .map_err(humanize_sdk_error)?;
     output::fee_breakdown(&fee);
     let signed = tx.sign(&keypair).map_err(humanize_sdk_error)?;
     let tx_hash = signed.hash();
@@ -119,7 +122,10 @@ async fn call(address: String, method: String, args: Vec<String>) -> Result<()> 
         .data(format!("contract:call:{method}:{}", args.join(",")).into_bytes())
         .build()
         .map_err(|err| anyhow!(err.to_string()))?;
-    let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
+    let (tx, fee) = tx
+        .with_estimated_fee(&client)
+        .await
+        .map_err(humanize_sdk_error)?;
     output::fee_breakdown(&fee);
     let signed = tx.sign(&keypair).map_err(humanize_sdk_error)?;
     let receipt = client

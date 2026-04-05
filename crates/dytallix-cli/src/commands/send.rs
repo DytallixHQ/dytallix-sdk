@@ -81,12 +81,16 @@ pub async fn run(args: SendArgs) -> Result<()> {
         .nonce(account.nonce)
         .build()
         .map_err(|err| anyhow!(err.to_string()))?;
-    let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
-    if account.balance.drt < fee.total_cost_drt {
+    let (tx, fee) = tx
+        .with_estimated_fee(&client)
+        .await
+        .map_err(humanize_sdk_error)?;
+    let available_fee_balance_micro = account.balance.dgt.saturating_mul(1_000_000);
+    if available_fee_balance_micro < fee.total_cost_drt {
         return Err(anyhow!(
-			"Insufficient DRT for gas fees. Required: {} DRT. Available: {} DRT. Run dytallix faucet to get more.",
-			format_number(fee.total_cost_drt),
-			format_number(account.balance.drt)
+			"Insufficient DGT for gas fees. Required: {} DGT. Available: {} DGT. Run dytallix faucet to get more.",
+			format_micro_amount(fee.total_cost_drt),
+			format_number(account.balance.dgt)
 		));
     }
 
@@ -103,6 +107,19 @@ pub async fn run(args: SendArgs) -> Result<()> {
 
 fn validate_destination_before_network(raw: &str) -> Result<dytallix_core::address::DAddr> {
     validate_address(raw)
+}
+
+fn format_micro_amount(value: u128) -> String {
+    let whole = value / 1_000_000;
+    let fractional = value % 1_000_000;
+    if fractional == 0 {
+        whole.to_string()
+    } else {
+        format!("{whole}.{fractional:06}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_owned()
+    }
 }
 
 #[cfg(test)]

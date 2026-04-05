@@ -7,9 +7,10 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-pqcrypto-dilithium = { workspace = true }
+fips204 = "0.4"
 pqcrypto-sphincsplus = { workspace = true }
 pqcrypto-traits = { workspace = true }
+rand_core = "0.6"
 blake3 = { workspace = true }
 bech32 = { workspace = true }
 serde = { workspace = true }

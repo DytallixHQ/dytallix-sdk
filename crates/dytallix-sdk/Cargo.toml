@@ -20,10 +20,12 @@ default = []
 network = ["dep:reqwest"]
 
 [dependencies]
+base64 = "0.22"
 dytallix-core = { path = "../dytallix-core" }
 reqwest = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha3 = "0.10"
 thiserror = { workspace = true }
 
 [dev-dependencies]

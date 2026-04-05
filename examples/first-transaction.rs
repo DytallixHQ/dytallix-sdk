@@ -7,6 +7,7 @@ use dytallix_sdk::error::SdkError;
 use dytallix_sdk::faucet::FaucetClient;
 use dytallix_sdk::transaction::TransactionBuilder;
 use dytallix_sdk::Token;
+use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -26,8 +27,8 @@ async fn main() -> anyhow::Result<()> {
         .amount(1, Token::DRT)
         .nonce(account.nonce)
         .build()?;
-    let fee = tx
-        .estimate_fee(&client)
+    let (tx, fee) = tx
+        .with_estimated_fee(&client)
         .await
         .map_err(humanize_transaction_error)?;
     println!("{fee}");
@@ -38,23 +39,25 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(humanize_transaction_error)?;
     println!("Transaction: {}", receipt.hash);
+    let receipt = wait_for_receipt(&client, &receipt.hash).await?;
     println!("Status: {:?}", receipt.status);
     Ok(())
 }
 
 fn humanize_transaction_error(error: SdkError) -> anyhow::Error {
-    match error {
-        SdkError::NodeUnavailable { endpoint, reason }
-            if endpoint.contains("/transactions")
-                && (reason.contains("405 Not Allowed")
-                    || reason.contains("404 Not Found")
-                    || reason.contains("<html")
-                    || reason.contains("<!DOCTYPE html")) =>
-        {
-            anyhow::anyhow!(
-                "The Dytallix testnet transaction API is not available at {endpoint}. Faucet funding worked, but transaction simulation or submission is not exposed from the current public endpoint."
-            )
+    anyhow::anyhow!(error.to_string())
+}
+
+async fn wait_for_receipt(
+    client: &DytallixClient,
+    hash: &str,
+) -> anyhow::Result<dytallix_sdk::TransactionReceipt> {
+    for _ in 0..15 {
+        let receipt = client.get_transaction(hash).await?;
+        match receipt.status {
+            dytallix_sdk::TransactionStatus::Pending => sleep(Duration::from_secs(1)).await,
+            _ => return Ok(receipt),
         }
-        other => anyhow::anyhow!(other.to_string()),
     }
+    client.get_transaction(hash).await.map_err(Into::into)
 }

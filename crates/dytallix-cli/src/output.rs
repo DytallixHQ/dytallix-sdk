@@ -78,13 +78,26 @@ fn format_balance(dgt: u128, drt: u128) -> String {
 
 fn format_fee_breakdown(estimate: &FeeEstimate) -> String {
     format!(
-		"  Fee estimate:\n    Compute (C-Gas):   {} units  {} DRT\n    Bandwidth (B-Gas): {} units  {} DRT\n    Total:             {} DRT",
+		"  Fee estimate:\n    Compute (C-Gas):   {} units  {} DGT\n    Bandwidth (B-Gas): {} units  {} DGT\n    Total:             {} DGT",
 		estimate.c_gas,
-		estimate.c_gas_cost_drt,
+		format_micro_token(estimate.c_gas_cost_drt),
 		estimate.b_gas,
-		estimate.b_gas_cost_drt,
-		estimate.total_cost_drt
+		format_micro_token(estimate.b_gas_cost_drt),
+		format_micro_token(estimate.total_cost_drt)
 	)
+}
+
+fn format_micro_token(value: u128) -> String {
+    let whole = value / 1_000_000;
+    let fractional = value % 1_000_000;
+    if fractional == 0 {
+        whole.to_string()
+    } else {
+        format!("{whole}.{fractional:06}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_owned()
+    }
 }
 
 #[cfg(test)]
@@ -120,10 +133,10 @@ mod tests {
     fn fee_breakdown_output_shows_both_gas_dimensions() {
         let estimate = FeeEstimate {
             c_gas: 21_000,
-            c_gas_cost_drt: 10,
+            c_gas_cost_drt: 10_000,
             b_gas: 512,
-            b_gas_cost_drt: 3,
-            total_cost_drt: 13,
+            b_gas_cost_drt: 3_000,
+            total_cost_drt: 13_000,
         };
         let rendered = format_fee_breakdown(&estimate);
         assert!(rendered.contains("C-Gas"));

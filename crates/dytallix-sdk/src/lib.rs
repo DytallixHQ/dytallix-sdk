@@ -2,7 +2,8 @@
 //! keystore support for Dytallix.
 //!
 //! The SDK models the canonical two-token system used by the Dytallix chain:
-//! DGT for governance and delegation, and DRT for gas fees and rewards.
+//! DGT for governance and delegation, and DRT for rewards. The current public
+//! node charges transaction fees in DGT micro-units.
 
 #[cfg(feature = "network")]
 pub mod client;
@@ -68,18 +69,18 @@ pub struct AccountState {
     pub key_scheme: KeyScheme,
 }
 
-/// A DRT-denominated fee estimate split into compute and bandwidth gas.
+/// A micro-denominated fee estimate split into compute and bandwidth gas.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FeeEstimate {
     /// Compute gas units.
     pub c_gas: u64,
-    /// The DRT cost of the compute gas component.
+    /// The fee cost of the compute gas component in micro-units.
     pub c_gas_cost_drt: u128,
     /// Bandwidth gas units.
     pub b_gas: u64,
-    /// The DRT cost of the bandwidth gas component.
+    /// The fee cost of the bandwidth gas component in micro-units.
     pub b_gas_cost_drt: u128,
-    /// The total fee, always denominated in DRT.
+    /// The total fee in micro-units.
     pub total_cost_drt: u128,
 }
 
@@ -88,15 +89,21 @@ impl fmt::Display for FeeEstimate {
         writeln!(f, "  Fee estimate:")?;
         writeln!(
             f,
-            "    Compute (C-Gas):   {} units  {} DRT",
-            self.c_gas, self.c_gas_cost_drt
+            "    Compute (C-Gas):   {} units  {} DGT",
+            self.c_gas,
+            format_micro_token(self.c_gas_cost_drt)
         )?;
         writeln!(
             f,
-            "    Bandwidth (B-Gas): {} units  {} DRT",
-            self.b_gas, self.b_gas_cost_drt
+            "    Bandwidth (B-Gas): {} units  {} DGT",
+            self.b_gas,
+            format_micro_token(self.b_gas_cost_drt)
         )?;
-        write!(f, "    Total:             {} DRT", self.total_cost_drt)
+        write!(
+            f,
+            "    Total:             {} DGT",
+            format_micro_token(self.total_cost_drt)
+        )
     }
 }
 
@@ -122,6 +129,19 @@ pub struct TransactionReceipt {
     pub status: TransactionStatus,
     /// The DRT fee charged for the transaction.
     pub fee: FeeEstimate,
+}
+
+fn format_micro_token(value: u128) -> String {
+    let whole = value / 1_000_000;
+    let fractional = value % 1_000_000;
+    if fractional == 0 {
+        whole.to_string()
+    } else {
+        format!("{whole}.{fractional:06}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_owned()
+    }
 }
 
 /// A Dytallix block summary.
@@ -244,6 +264,8 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use base64::Engine as _;
+
     use crate::keystore::Keystore;
     use crate::transaction::TransactionBuilder;
     use crate::{Balance, DAddr, DytallixKeypair, FeeEstimate, Token};
@@ -261,14 +283,14 @@ mod tests {
     fn fee_estimate_display() {
         let fee = FeeEstimate {
             c_gas: 21_000,
-            c_gas_cost_drt: 42,
+            c_gas_cost_drt: 42_000,
             b_gas: 512,
-            b_gas_cost_drt: 7,
-            total_cost_drt: 49,
+            b_gas_cost_drt: 7_000,
+            total_cost_drt: 49_000,
         };
         assert_eq!(
             fee.to_string(),
-            "  Fee estimate:\n    Compute (C-Gas):   21000 units  42 DRT\n    Bandwidth (B-Gas): 512 units  7 DRT\n    Total:             49 DRT"
+            "  Fee estimate:\n    Compute (C-Gas):   21000 units  0.042 DGT\n    Bandwidth (B-Gas): 512 units  0.007 DGT\n    Total:             0.049 DGT"
         );
     }
 
@@ -298,7 +320,10 @@ mod tests {
             .unwrap();
 
         let signed = transaction.sign(&keypair).unwrap();
-        assert_eq!(signed.signature.len(), 3_309);
+        let signature = base64::engine::general_purpose::STANDARD
+            .decode(&signed.signature)
+            .unwrap();
+        assert_eq!(signature.len(), 3_309);
     }
 
     #[test]

@@ -94,7 +94,7 @@ async fn simulate_tx(address: String, amount: u128) -> Result<()> {
         .amount(amount, Token::DRT)
         .nonce(account.nonce)
         .build()?;
-    let fee = tx.estimate_fee(&client).await?;
+    let (_, fee) = tx.with_estimated_fee(&client).await?;
     output::fee_breakdown(&fee);
     Ok(())
 }

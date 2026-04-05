@@ -67,7 +67,10 @@ async fn submit_stake_tx(operation: &str, validator: &str, amount: u128) -> Resu
         .data(payload)
         .build()
         .map_err(|err| anyhow!(err.to_string()))?;
-    let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
+    let (tx, fee) = tx
+        .with_estimated_fee(&client)
+        .await
+        .map_err(humanize_sdk_error)?;
     output::fee_breakdown(&fee);
     let signed = tx.sign(&keypair).map_err(humanize_sdk_error)?;
     let receipt = client
@@ -97,7 +100,10 @@ async fn claim_rewards() -> Result<()> {
         .data(b"stake:claim".to_vec())
         .build()
         .map_err(|err| anyhow!(err.to_string()))?;
-    let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
+    let (tx, fee) = tx
+        .with_estimated_fee(&client)
+        .await
+        .map_err(humanize_sdk_error)?;
     output::fee_breakdown(&fee);
     let signed = tx.sign(&keypair).map_err(humanize_sdk_error)?;
     let receipt = client
