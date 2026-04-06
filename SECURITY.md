@@ -1,50 +1,63 @@
-Security Policy
+# Security Policy
 
-Reporting a Vulnerability
-Dytallix is a post-quantum cryptography native blockchain. Security is the entire point. If you find a vulnerability we want to know about it immediately.
+Dytallix is a post-quantum-cryptography-native blockchain. Security is the
+entire point. If you find a vulnerability, report it privately.
+
 Do not open a public GitHub issue for security vulnerabilities.
 
-How to Report
-Report security vulnerabilities by sending a message directly to the maintainer on Discord:
-https://discord.gg/eyVvu5kmPG
-Open a direct message and include:
+## Reporting a Vulnerability
 
-A description of the vulnerability
-The component affected (dytallix-core, dytallix-sdk, dytallix-cli, or the chain itself)
-Steps to reproduce if applicable
-Your assessment of severity and exploitability
-Whether you want public credit when the issue is disclosed
+Report security issues by sending a direct message to the maintainer on
+[Discord](https://discord.gg/eyVvu5kmPG).
 
-You will receive a response within 24 hours.
+Include:
 
-What Happens Next
+- A description of the vulnerability
+- The affected component: `dytallix-core`, `dytallix-sdk`, `dytallix-cli`, or chain infrastructure
+- Reproduction steps, proof of concept, or logs when applicable
+- Your severity and exploitability assessment
+- Whether you want public credit when the issue is disclosed
 
-We confirm receipt and begin investigation immediately
-We assess severity and determine whether a fix is required before or after public disclosure
-We develop and test a fix
-We issue a patched release
-We publish a security advisory with full details and credit to the reporter
+You should receive an initial response within 24 hours.
 
-Scope
-The following are in scope for security reports:
+## What Happens Next
 
-dytallix-core: ML-DSA-65 keypair generation, Bech32m address derivation and validation, signature verification, BLAKE3 hashing
-dytallix-sdk: transaction construction and signing, faucet client, keystore implementation, network client
-dytallix-cli: any command that could expose private key material, bypass address validation, or allow unauthorized transactions
-Chain level: consensus logic, networking layer, execution environment, fee market
+1. We confirm receipt and begin investigation.
+2. We assess severity and decide on a disclosure timeline.
+3. We develop and test a fix.
+4. We publish a patched release or advisory as appropriate.
+5. We credit the reporter unless they request otherwise.
 
-Out of Scope
+## Scope
 
-Issues in third-party dependencies should be reported to the dependency maintainer directly
-Theoretical attacks without a practical exploit path
-Issues that require physical access to the device running the node
+The following areas are in scope for security reports:
 
-Cryptographic Implementation Notes
-We maintain an Open Problems section in the Technical Whitepaper and organization README that documents known limitations in the cryptographic implementation. If you believe one of these open problems is more serious than characterized, or if you find an issue not listed there, please report it.
-Known open problems: https://github.com/DytallixHQ
+- `dytallix-core`: ML-DSA-65 key generation, Bech32m address derivation and validation, signature verification, BLAKE3 hashing
+- `dytallix-sdk`: transaction construction and signing, faucet client behavior, keystore handling, network client behavior
+- `dytallix-cli`: commands that could expose private key material, bypass address validation, or submit unauthorized transactions
+- Chain-level integrations: consensus logic, networking, execution environment, fee market assumptions
 
-Preferred Languages
+## Out of Scope
+
+- Bugs that only affect third-party dependencies and should be reported upstream
+- Purely theoretical attacks with no practical exploit path
+- Issues that require physical access to the device running the node
+
+## Cryptographic Implementation Notes
+
+Public cryptographic limitations and open problems may also be discussed in
+Dytallix public materials such as the
+[organization page](https://github.com/DytallixHQ) and the
+[documentation repository](https://github.com/DytallixHQ/dytallix-docs).
+
+If you believe a known limitation is more serious than characterized, or if you
+find an issue not already documented, report it privately.
+
+## Preferred Language
+
 English.
 
-Disclosure Policy
-We follow responsible disclosure. We ask for a reasonable window to develop and release a fix before public disclosure. We will work with you on timing and will credit you publicly unless you request otherwise.
+## Disclosure Policy
+
+We follow responsible disclosure. Please allow a reasonable window to develop
+and ship a fix before public disclosure. We will work with you on timing.
