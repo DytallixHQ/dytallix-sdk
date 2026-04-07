@@ -111,6 +111,15 @@ Prepare a first contract deployment:
 dytallix contract deploy ./my_contract.wasm
 ```
 
+After deploy, verify the indexed contract metadata with:
+
+```bash
+dytallix contract info <contract-address>
+```
+
+On the public testnet gateway, `dytallix contract info <contract-address>` is the
+canonical verification path if `/tx/<hash>` indexing lags behind contract metadata.
+
 ## Local Files
 
 - Keystore: `~/.dytallix/keystore.json`

@@ -150,12 +150,21 @@ dytallix contract query <contract> get_count
 Current public behavior:
 
 - `deploy` posts WASM bytes to `https://dytallix.com/contracts/deploy`
+- `deploy` polls `/tx/<hash>` and `/api/contracts/<address>` after submission and prints a confirmed state as soon as one of those public routes is indexed
+- `deploy` prints `dytallix contract info <address>` as the canonical contract verification path on the public gateway when `/tx/<hash>` lags
 - `call` posts method execution requests to `https://dytallix.com/contracts/call`
 - `info <address>` reads `https://dytallix.com/api/contracts/<address>`
 - `query` reads `https://dytallix.com/api/contracts/<address>/query/<method>`
 - `events` reads `https://dytallix.com/api/contracts/<address>/events`
 - for a direct node endpoint or a local node, set `DYTALLIX_ENDPOINT` or run
   `dytallix config set endpoint http://localhost:3030`
+
+Recommended verification flow after deploy:
+
+```bash
+dytallix contract deploy ./my_contract.wasm
+dytallix contract info <contract-address>
+```
 
 ### `chain`
 
