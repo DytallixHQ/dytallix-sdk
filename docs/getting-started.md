@@ -52,9 +52,6 @@ cargo run -p dytallix-sdk --example first-keypair
 
 ## Network Features
 
-The default crate is optimized for the shortest first-keypair path. If you need
-the testnet client or faucet client, enable the `network` feature:
-
 ```bash
 cargo add dytallix-sdk --git https://github.com/DytallixHQ/dytallix-sdk.git --features network
 ```
@@ -75,9 +72,9 @@ let client = DytallixClient::testnet().await?;
 let faucet = FaucetClient::testnet();
 ```
 
-The public testnet surface is still evolving. Faucet access may be available
-even when transaction simulation or submission endpoints are not exposed from
-the current public endpoint.
+The public testnet surface is still evolving, but the SDK now targets the live
+read, faucet, and transaction submission routes exposed from
+`https://dytallix.com`.
 
 ## CLI Quickstart
 

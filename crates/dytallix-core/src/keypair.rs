@@ -1,4 +1,6 @@
-use pqcrypto_dilithium::dilithium3;
+use blake3::Hasher as Blake3Hasher;
+use fips204::ml_dsa_65;
+use fips204::traits::{KeyGen, SerDes, Signer};
 use pqcrypto_sphincsplus::sphincsshake192ssimple;
 use pqcrypto_traits::sign::{
     DetachedSignature as DetachedSignatureTrait, PublicKey as PublicKeyTrait,
@@ -7,7 +9,6 @@ use pqcrypto_traits::sign::{
 
 use crate::error::DytallixError;
 
-const MLDSA65_PUBLIC_KEY_BYTES: usize = 1_952;
 const MLDSA65_PRIVATE_KEY_BYTES: usize = 4_032;
 const MLDSA65_SIGNATURE_BYTES: usize = 3_309;
 const SLHDSA_PUBLIC_KEY_BYTES: usize = 48;
@@ -29,7 +30,7 @@ const SLHDSA_SIGNATURE_BYTES: usize = 16_224;
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum KeyScheme {
-    /// ML-DSA-65 (FIPS 204 / Dilithium3), the canonical Dytallix signing scheme.
+    /// ML-DSA-65 (FIPS 204), the canonical Dytallix signing scheme.
     MlDsa65,
     /// SLH-DSA-SHAKE-192s, supported for cold storage and explicit opt-in flows.
     SlhDsa,
@@ -70,11 +71,12 @@ impl DytallixKeypair {
     /// assert_eq!(keypair.private_key().len(), 4032);
     /// ```
     pub fn generate() -> Self {
-        let (public_key, private_key) = dilithium3::keypair();
+        let (public_key, private_key) = ml_dsa_65::KG::try_keygen()
+            .expect("ML-DSA-65 key generation should succeed with the OS RNG");
 
         Self {
-            public_key: public_key.as_bytes().to_vec(),
-            private_key: private_key.as_bytes().to_vec(),
+            public_key: public_key.into_bytes().to_vec(),
+            private_key: private_key.into_bytes().to_vec(),
             scheme: KeyScheme::MlDsa65,
         }
     }
@@ -121,13 +123,12 @@ impl DytallixKeypair {
     pub fn from_private_key(bytes: &[u8]) -> Result<Self, DytallixError> {
         match bytes.len() {
             MLDSA65_PRIVATE_KEY_BYTES => {
-                let private_key = <dilithium3::SecretKey as SecretKeyTrait>::from_bytes(bytes)
-                    .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))?;
-                let public_key = recover_mldsa65_public_key(private_key.as_bytes())?;
+                let private_key = ml_dsa_65_private_key_from_bytes(bytes)?;
+                let public_key = private_key.get_public_key();
 
                 Ok(Self {
-                    public_key,
-                    private_key: private_key.as_bytes().to_vec(),
+                    public_key: public_key.into_bytes().to_vec(),
+                    private_key: private_key.into_bytes().to_vec(),
                     scheme: KeyScheme::MlDsa65,
                 })
             }
@@ -170,11 +171,12 @@ impl DytallixKeypair {
     pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>, DytallixError> {
         match self.scheme {
             KeyScheme::MlDsa65 => {
-                let private_key =
-                    <dilithium3::SecretKey as SecretKeyTrait>::from_bytes(&self.private_key)
-                        .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))?;
-                let signature = dilithium3::detached_sign(message, &private_key);
-                let bytes = signature.as_bytes().to_vec();
+                let private_key = ml_dsa_65_private_key_from_bytes(&self.private_key)?;
+                let seed = deterministic_mldsa65_seed(&self.private_key, message);
+                let signature = private_key
+                    .try_sign_with_seed(&seed, message, &[])
+                    .map_err(|err| DytallixError::CryptoError(err.to_string()))?;
+                let bytes = signature.to_vec();
 
                 if bytes.len() != MLDSA65_SIGNATURE_BYTES {
                     return Err(DytallixError::InvalidSignatureSize {
@@ -249,124 +251,23 @@ impl DytallixKeypair {
     }
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct Poly {
-    coeffs: [i32; 256],
-}
-
-impl Default for Poly {
-    fn default() -> Self {
-        Self { coeffs: [0; 256] }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct Polyvecl {
-    vec: [Poly; 5],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct Polyveck {
-    vec: [Poly; 6],
-}
-
-mod ffi {
-    use super::{Polyveck, Polyvecl};
-
-    unsafe extern "C" {
-        pub fn PQCLEAN_DILITHIUM3_CLEAN_unpack_sk(
-            rho: *mut u8,
-            tr: *mut u8,
-            key: *mut u8,
-            t0: *mut Polyveck,
-            s1: *mut Polyvecl,
-            s2: *mut Polyveck,
-            sk: *const u8,
-        );
-
-        pub fn PQCLEAN_DILITHIUM3_CLEAN_pack_pk(pk: *mut u8, rho: *const u8, t1: *const Polyveck);
-
-        pub fn PQCLEAN_DILITHIUM3_CLEAN_polyvec_matrix_expand(mat: *mut Polyvecl, rho: *const u8);
-
-        pub fn PQCLEAN_DILITHIUM3_CLEAN_polyvecl_ntt(v: *mut Polyvecl);
-        pub fn PQCLEAN_DILITHIUM3_CLEAN_polyvec_matrix_pointwise_montgomery(
-            t: *mut Polyveck,
-            mat: *const Polyvecl,
-            v: *const Polyvecl,
-        );
-        pub fn PQCLEAN_DILITHIUM3_CLEAN_polyveck_reduce(v: *mut Polyveck);
-        pub fn PQCLEAN_DILITHIUM3_CLEAN_polyveck_invntt_tomont(v: *mut Polyveck);
-        pub fn PQCLEAN_DILITHIUM3_CLEAN_polyveck_add(
-            w: *mut Polyveck,
-            u: *const Polyveck,
-            v: *const Polyveck,
-        );
-        pub fn PQCLEAN_DILITHIUM3_CLEAN_polyveck_caddq(v: *mut Polyveck);
-        pub fn PQCLEAN_DILITHIUM3_CLEAN_polyveck_power2round(
-            v1: *mut Polyveck,
-            v0: *mut Polyveck,
-            v: *const Polyveck,
-        );
-    }
-}
-
-fn recover_mldsa65_public_key(private_key: &[u8]) -> Result<Vec<u8>, DytallixError> {
-    if private_key.len() != MLDSA65_PRIVATE_KEY_BYTES {
-        return Err(DytallixError::InvalidKeySize {
+fn ml_dsa_65_private_key_from_bytes(
+    bytes: &[u8],
+) -> Result<ml_dsa_65::PrivateKey, DytallixError> {
+    let private_key = bytes
+        .try_into()
+        .map_err(|_| DytallixError::InvalidKeySize {
             expected: MLDSA65_PRIVATE_KEY_BYTES,
-            got: private_key.len(),
-        });
-    }
+            got: bytes.len(),
+        })?;
+    ml_dsa_65::PrivateKey::try_from_bytes(private_key)
+        .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))
+}
 
-    let mut rho = [0u8; 32];
-    let mut tr = [0u8; 64];
-    let mut key = [0u8; 32];
-    let mut t0 = Polyveck::default();
-    let mut s1 = Polyvecl::default();
-    let mut s2 = Polyveck::default();
-    let mut mat = [Polyvecl::default(); 6];
-    let mut t1 = Polyveck::default();
-    let mut t0_round = Polyveck::default();
-    let mut public_key = vec![0u8; MLDSA65_PUBLIC_KEY_BYTES];
-
-    unsafe {
-        ffi::PQCLEAN_DILITHIUM3_CLEAN_unpack_sk(
-            rho.as_mut_ptr(),
-            tr.as_mut_ptr(),
-            key.as_mut_ptr(),
-            &mut t0,
-            &mut s1,
-            &mut s2,
-            private_key.as_ptr(),
-        );
-
-        let mut s1hat = s1;
-        ffi::PQCLEAN_DILITHIUM3_CLEAN_polyvec_matrix_expand(mat.as_mut_ptr(), rho.as_ptr());
-        ffi::PQCLEAN_DILITHIUM3_CLEAN_polyvecl_ntt(&mut s1hat);
-        ffi::PQCLEAN_DILITHIUM3_CLEAN_polyvec_matrix_pointwise_montgomery(
-            &mut t1,
-            mat.as_ptr(),
-            &s1hat,
-        );
-        ffi::PQCLEAN_DILITHIUM3_CLEAN_polyveck_reduce(&mut t1);
-        ffi::PQCLEAN_DILITHIUM3_CLEAN_polyveck_invntt_tomont(&mut t1);
-
-        let t1_ptr: *mut Polyveck = &mut t1;
-        ffi::PQCLEAN_DILITHIUM3_CLEAN_polyveck_add(t1_ptr, t1_ptr as *const Polyveck, &s2);
-        ffi::PQCLEAN_DILITHIUM3_CLEAN_polyveck_caddq(t1_ptr);
-        ffi::PQCLEAN_DILITHIUM3_CLEAN_polyveck_power2round(
-            t1_ptr,
-            &mut t0_round,
-            t1_ptr as *const Polyveck,
-        );
-        ffi::PQCLEAN_DILITHIUM3_CLEAN_pack_pk(public_key.as_mut_ptr(), rho.as_ptr(), &t1);
-    }
-
-    let public_key = <dilithium3::PublicKey as PublicKeyTrait>::from_bytes(&public_key)
-        .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))?;
-
-    Ok(public_key.as_bytes().to_vec())
+fn deterministic_mldsa65_seed(private_key: &[u8], message: &[u8]) -> [u8; 32] {
+    let mut hasher = Blake3Hasher::new();
+    hasher.update(b"dytallix-ml-dsa-65-seed");
+    hasher.update(private_key);
+    hasher.update(message);
+    *hasher.finalize().as_bytes()
 }

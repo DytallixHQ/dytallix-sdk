@@ -11,6 +11,8 @@ from the repository root.
   attempt a signed transfer against the configured public testnet endpoints
 - [`deploy-contract.rs`](deploy-contract.rs) - use the CLI keystore and prepare
   a first contract deployment flow
+- [`contracts/minimal_contract`](contracts/minimal_contract) - build a minimal
+  deployable WASM artifact for the public contract quickstart
 
 ## Run
 
@@ -18,6 +20,8 @@ from the repository root.
 cargo run -p dytallix-sdk --example first-keypair
 cargo run -p dytallix-sdk --features network --example first-transaction
 cargo run -p dytallix-cli --example deploy-contract
+rustup target add wasm32-unknown-unknown
+cargo build --manifest-path examples/contracts/minimal_contract/Cargo.toml --target wasm32-unknown-unknown --release
 ```
 
 ## Related Docs

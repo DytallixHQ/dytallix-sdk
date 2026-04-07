@@ -19,7 +19,8 @@ cargo add dytallix-sdk --git https://github.com/DytallixHQ/dytallix-sdk.git --fe
 ## What is the difference between DGT and DRT?
 
 - `DGT` is the governance and delegation token.
-- `DRT` is used for gas fees, rewards, and burns.
+- `DRT` is used for rewards and burns.
+- The current public node charges transaction fees in `udgt`.
 
 The SDK models both through the `Token` enum.
 
@@ -54,24 +55,18 @@ Under `~/.dytallix/`:
 No. The CLI can generate SLH-DSA keys for cryptographic workflows, but the
 normal Dytallix account path and D-Addr derivation are ML-DSA-65 based.
 
-## Why can faucet funding work while transaction submission still fails?
-
-The public testnet API surface is still evolving. The repository example
-[`first-transaction.rs`](../examples/first-transaction.rs) already handles the
-case where faucet funding is available but transaction simulation or submission
-endpoints are not exposed from the current public endpoint.
-
-## How do I switch between testnet, mainnet, and local development?
+## How do I switch between testnet and local development?
 
 Use:
 
 ```bash
 dytallix config network testnet
-dytallix config network mainnet
 dytallix config network local
 ```
 
-The active profile controls which node and faucet endpoints the CLI uses.
+The active profile controls which node and faucet endpoints the CLI uses. The
+`mainnet` profile remains reserved in config files, but the public CLI does not
+offer a selectable mainnet endpoint.
 
 ## Where should I ask for help or report issues?
 

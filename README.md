@@ -137,8 +137,8 @@ Release tags matching `v*` build downloadable CLI archives for Linux, macOS
 - [dytallix-sdk](https://github.com/DytallixHQ/dytallix-sdk) - this repository
 - [dytallix-contracts](https://github.com/DytallixHQ/dytallix-contracts) - protocol contracts
 - [dytallix-docs](https://github.com/DytallixHQ/dytallix-docs) - broader documentation
-- [dytallix-explorer](https://github.com/DytallixHQ/dytallix-explorer) - explorer codebase
-- [dytallix-faucet](https://github.com/DytallixHQ/dytallix-faucet) - faucet codebase
+- [dytallix-explorer](https://github.com/DytallixHQ/dytallix-explorer) - public explorer service repository
+- [dytallix-faucet](https://github.com/DytallixHQ/dytallix-faucet) - public faucet service repository
 
 ## External Links
 

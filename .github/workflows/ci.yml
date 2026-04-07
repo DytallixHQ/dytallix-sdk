@@ -27,5 +27,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Build
         run: cargo build --all
+      - name: Verify first keypair path
+        run: bash scripts/public_smoke.sh first-keypair
       - name: Test
         run: cargo test --all

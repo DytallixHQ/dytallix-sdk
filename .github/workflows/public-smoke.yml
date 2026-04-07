@@ -1,0 +1,39 @@
+name: Public Smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * *"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  first-keypair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify first keypair path
+        run: bash scripts/public_smoke.sh first-keypair
+
+  first-transaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify first transaction against live testnet
+        run: bash scripts/public_smoke.sh first-transaction
+
+  contract-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify contract deploy happy path
+        run: bash scripts/public_smoke.sh contract-deploy

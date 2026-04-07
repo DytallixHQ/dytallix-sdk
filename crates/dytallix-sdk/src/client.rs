@@ -1,10 +1,12 @@
 //! Asynchronous HTTP client for Dytallix node APIs.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use reqwest::Url;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use tokio::time::sleep;
 
 use crate::error::SdkError;
 use crate::transaction::{SignedTransaction, Transaction};
@@ -103,6 +105,7 @@ impl DytallixClient {
         tx: &SignedTransaction,
     ) -> Result<TransactionReceipt, SdkError> {
         let url = self.url("/api/blockchain/submit")?;
+        let tx_hash = tx.hash();
         let response = self
             .http
             .post(url.clone())
@@ -128,6 +131,9 @@ impl DytallixClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "request rejected".to_owned());
+            if let Some(receipt) = self.lookup_submitted_transaction(&tx_hash).await {
+                return Ok(receipt);
+            }
             Err(SdkError::TransactionRejected(reason))
         }
     }
@@ -213,6 +219,16 @@ impl DytallixClient {
             ),
         }
     }
+
+    async fn lookup_submitted_transaction(&self, hash: &str) -> Option<TransactionReceipt> {
+        for _ in 0..3 {
+            sleep(Duration::from_millis(750)).await;
+            if let Ok(receipt) = self.get_transaction(hash).await {
+                return Some(receipt);
+            }
+        }
+        None
+    }
 }
 
 fn normalize_endpoint(endpoint: &str) -> Result<String, SdkError> {
@@ -284,7 +300,7 @@ struct SubmittedTransaction {
 
 #[derive(Debug, serde::Deserialize)]
 struct TransactionReceiptResponse {
-    #[serde(rename = "tx_hash")]
+    #[serde(alias = "hash", rename = "tx_hash")]
     hash: String,
     #[serde(
         rename = "block_height",

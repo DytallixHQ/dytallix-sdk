@@ -1,20 +1,23 @@
-//! Network client, transaction builder, faucet client, and keystore support
-//! for Dytallix.
+//! Keypair, address, transaction, optional network client, faucet client, and
+//! keystore support for Dytallix.
 //!
 //! The SDK models the canonical two-token system used by the Dytallix chain:
-//! DGT for governance and delegation, and DRT for gas fees and rewards.
+//! DGT for governance and delegation, and DRT for rewards. The current public
+//! node charges transaction fees in DGT micro-units.
 
+#[cfg(feature = "network")]
 pub mod client;
 pub mod error;
+#[cfg(feature = "network")]
 pub mod faucet;
 pub mod keystore;
 pub mod transaction;
 
 use std::fmt;
 
-use dytallix_core::address::DAddr;
-
-pub use dytallix_core::keypair::KeyScheme;
+pub use dytallix_core::address::DAddr;
+pub use dytallix_core::keypair::{DytallixKeypair, KeyScheme};
+pub use dytallix_core::signature::verify_mldsa65;
 pub use error::SdkError;
 
 /// The two canonical Dytallix tokens.
@@ -22,7 +25,7 @@ pub use error::SdkError;
 pub enum Token {
     /// Dytallix Governance Token used for governance and delegation.
     DGT,
-    /// Dytallix Reward Token used for gas fees, rewards, and burns.
+    /// Dytallix Reward Token used for rewards and burns.
     DRT,
 }
 
@@ -40,7 +43,7 @@ impl fmt::Display for Token {
 pub struct Balance {
     /// The DGT balance used for governance and delegation.
     pub dgt: u128,
-    /// The DRT balance used for gas fees and rewards.
+    /// The DRT balance used for rewards and burns.
     pub drt: u128,
 }
 
@@ -66,18 +69,18 @@ pub struct AccountState {
     pub key_scheme: KeyScheme,
 }
 
-/// A DRT-denominated fee estimate split into compute and bandwidth gas.
+/// A micro-denominated fee estimate split into compute and bandwidth gas.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FeeEstimate {
     /// Compute gas units.
     pub c_gas: u64,
-    /// The DRT cost of the compute gas component.
+    /// Historical field name retained for SDK compatibility.
     pub c_gas_cost_drt: u128,
     /// Bandwidth gas units.
     pub b_gas: u64,
-    /// The DRT cost of the bandwidth gas component.
+    /// Historical field name retained for SDK compatibility.
     pub b_gas_cost_drt: u128,
-    /// The total fee, always denominated in DRT.
+    /// Historical field name retained for SDK compatibility.
     pub total_cost_drt: u128,
 }
 
@@ -86,15 +89,21 @@ impl fmt::Display for FeeEstimate {
         writeln!(f, "  Fee estimate:")?;
         writeln!(
             f,
-            "    Compute (C-Gas):   {} units  {} DRT",
-            self.c_gas, self.c_gas_cost_drt
+            "    Compute (C-Gas):   {} units  {} DGT",
+            self.c_gas,
+            format_micro_token(self.c_gas_cost_drt)
         )?;
         writeln!(
             f,
-            "    Bandwidth (B-Gas): {} units  {} DRT",
-            self.b_gas, self.b_gas_cost_drt
+            "    Bandwidth (B-Gas): {} units  {} DGT",
+            self.b_gas,
+            format_micro_token(self.b_gas_cost_drt)
         )?;
-        write!(f, "    Total:             {} DRT", self.total_cost_drt)
+        write!(
+            f,
+            "    Total:             {} DGT",
+            format_micro_token(self.total_cost_drt)
+        )
     }
 }
 
@@ -118,8 +127,21 @@ pub struct TransactionReceipt {
     pub block: u64,
     /// The transaction execution status.
     pub status: TransactionStatus,
-    /// The DRT fee charged for the transaction.
+    /// The fee charged for the transaction.
     pub fee: FeeEstimate,
+}
+
+fn format_micro_token(value: u128) -> String {
+    let whole = value / 1_000_000;
+    let fractional = value % 1_000_000;
+    if fractional == 0 {
+        whole.to_string()
+    } else {
+        format!("{whole}.{fractional:06}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_owned()
+    }
 }
 
 /// A Dytallix block summary.
@@ -242,12 +264,11 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use dytallix_core::address::DAddr;
-    use dytallix_core::keypair::DytallixKeypair;
+    use base64::Engine as _;
 
     use crate::keystore::Keystore;
     use crate::transaction::TransactionBuilder;
-    use crate::{Balance, FeeEstimate, Token};
+    use crate::{Balance, DAddr, DytallixKeypair, FeeEstimate, Token};
 
     #[test]
     fn balance_display() {
@@ -262,14 +283,14 @@ mod tests {
     fn fee_estimate_display() {
         let fee = FeeEstimate {
             c_gas: 21_000,
-            c_gas_cost_drt: 42,
+            c_gas_cost_drt: 42_000,
             b_gas: 512,
-            b_gas_cost_drt: 7,
-            total_cost_drt: 49,
+            b_gas_cost_drt: 7_000,
+            total_cost_drt: 49_000,
         };
         assert_eq!(
             fee.to_string(),
-            "  Fee estimate:\n    Compute (C-Gas):   21000 units  42 DRT\n    Bandwidth (B-Gas): 512 units  7 DRT\n    Total:             49 DRT"
+            "  Fee estimate:\n    Compute (C-Gas):   21000 units  0.042 DGT\n    Bandwidth (B-Gas): 512 units  0.007 DGT\n    Total:             0.049 DGT"
         );
     }
 
@@ -277,6 +298,13 @@ mod tests {
     fn transaction_builder_validation() {
         let result = TransactionBuilder::new().build();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn sdk_surface_exposes_keypair_and_address() {
+        let keypair = DytallixKeypair::generate();
+        let address = DAddr::from_public_key(keypair.public_key()).unwrap();
+        assert!(address.as_str().starts_with("dytallix1"));
     }
 
     #[test]
@@ -292,7 +320,10 @@ mod tests {
             .unwrap();
 
         let signed = transaction.sign(&keypair).unwrap();
-        assert_eq!(signed.signature.len(), 3_309);
+        let signature = base64::engine::general_purpose::STANDARD
+            .decode(&signed.signature)
+            .unwrap();
+        assert_eq!(signature.len(), 3_309);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 use reqwest::Url;
 
 use crate::error::SdkError;
-use crate::{Balance, FaucetStatus, Token};
+use crate::{Balance, FaucetStatus};
 use dytallix_core::address::DAddr;
 
 /// Client for requesting DGT and DRT from a Dytallix faucet.
@@ -24,40 +24,66 @@ impl FaucetClient {
 
     /// Creates a faucet client for the canonical Dytallix testnet faucet.
     pub fn testnet() -> Self {
-        Self::new("https://faucet.dytallix.com")
+        Self::new("https://dytallix.com/api/faucet")
     }
 
     /// Requests both DGT and DRT for the provided address.
     pub async fn fund(&self, address: &DAddr) -> Result<Balance, SdkError> {
-        self.post_balance("/v1/fund", &FundRequest::both(address.clone()))
-            .await
+        let limits = self.get_limits().await?;
+        let response = self
+            .post_request(
+                "/request",
+                &FundRequest::new(address.clone(), limits.dgt, limits.drt),
+            )
+            .await?;
+
+        if response.balances.dgt > 0 || response.balances.drt > 0 {
+            Ok(response.balances)
+        } else {
+            Ok(Balance {
+                dgt: response.funded.dgt,
+                drt: response.funded.drt,
+            })
+        }
     }
 
     /// Requests DGT for the provided address.
     pub async fn fund_dgt(&self, address: &DAddr) -> Result<u128, SdkError> {
+        let limits = self.get_limits().await?;
         let response = self
-            .post_amount(
-                "/v1/fund/dgt",
-                &FundRequest::single(address.clone(), Token::DGT),
+            .post_request(
+                "/request",
+                &FundRequest::new(address.clone(), limits.dgt, 0),
             )
             .await?;
-        Ok(response.amount)
+
+        Ok(if response.funded.dgt > 0 {
+            response.funded.dgt
+        } else {
+            limits.dgt
+        })
     }
 
     /// Requests DRT for the provided address.
     pub async fn fund_drt(&self, address: &DAddr) -> Result<u128, SdkError> {
+        let limits = self.get_limits().await?;
         let response = self
-            .post_amount(
-                "/v1/fund/drt",
-                &FundRequest::single(address.clone(), Token::DRT),
+            .post_request(
+                "/request",
+                &FundRequest::new(address.clone(), 0, limits.drt),
             )
             .await?;
-        Ok(response.amount)
+
+        Ok(if response.funded.drt > 0 {
+            response.funded.drt
+        } else {
+            limits.drt
+        })
     }
 
     /// Fetches faucet eligibility and retry information for the provided address.
     pub async fn status(&self, address: &DAddr) -> Result<FaucetStatus, SdkError> {
-        let url = self.url(&format!("/v1/status/{address}"))?;
+        let url = self.url(&format!("/check/{address}"))?;
         let response =
             self.http
                 .get(url.clone())
@@ -69,10 +95,15 @@ impl FaucetClient {
                 })?;
 
         if response.status().is_success() {
-            response
+            let status: FaucetCheckResponse = response
                 .json()
                 .await
-                .map_err(|err| SdkError::Serialization(err.to_string()))
+                .map_err(|err| SdkError::Serialization(err.to_string()))?;
+
+            Ok(FaucetStatus {
+                can_request: status.can_request,
+                retry_after_seconds: status.time_until_next.map(|minutes| minutes * 60),
+            })
         } else if response.status().as_u16() == 429 {
             let retry_after_seconds = retry_after_seconds(response.headers());
             Err(SdkError::FaucetRateLimited {
@@ -90,46 +121,11 @@ impl FaucetClient {
         }
     }
 
-    async fn post_balance(&self, path: &str, request: &FundRequest) -> Result<Balance, SdkError> {
-        let url = self.url(path)?;
-        let response = self
-            .http
-            .post(url.clone())
-            .json(request)
-            .send()
-            .await
-            .map_err(|err| SdkError::FaucetUnavailable {
-                endpoint: url.to_string(),
-                reason: err.to_string(),
-            })?;
-
-        if response.status().is_success() {
-            response
-                .json()
-                .await
-                .map_err(|err| SdkError::Serialization(err.to_string()))
-        } else if response.status().as_u16() == 429 {
-            let retry_after_seconds = retry_after_seconds(response.headers());
-            Err(SdkError::FaucetRateLimited {
-                retry_after_seconds,
-            })
-        } else {
-            let reason = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "request failed".to_owned());
-            Err(SdkError::FaucetUnavailable {
-                endpoint: url.to_string(),
-                reason,
-            })
-        }
-    }
-
-    async fn post_amount(
+    async fn post_request(
         &self,
         path: &str,
         request: &FundRequest,
-    ) -> Result<FundAmountResponse, SdkError> {
+    ) -> Result<FundResponse, SdkError> {
         let url = self.url(path)?;
         let response = self
             .http
@@ -147,6 +143,42 @@ impl FaucetClient {
                 .json()
                 .await
                 .map_err(|err| SdkError::Serialization(err.to_string()))
+        } else if response.status().as_u16() == 429 {
+            let retry_after_seconds = retry_after_seconds(response.headers());
+            Err(SdkError::FaucetRateLimited {
+                retry_after_seconds,
+            })
+        } else {
+            let reason = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "request failed".to_owned());
+            Err(SdkError::FaucetUnavailable {
+                endpoint: url.to_string(),
+                reason,
+            })
+        }
+    }
+
+    async fn get_limits(&self) -> Result<FaucetLimits, SdkError> {
+        let url = self.url("/status")?;
+        let response =
+            self.http
+                .get(url.clone())
+                .send()
+                .await
+                .map_err(|err| SdkError::FaucetUnavailable {
+                    endpoint: url.to_string(),
+                    reason: err.to_string(),
+                })?;
+
+        if response.status().is_success() {
+            let status: FaucetStatusResponse = response
+                .json()
+                .await
+                .map_err(|err| SdkError::Serialization(err.to_string()))?;
+
+            Ok(status.limits)
         } else if response.status().as_u16() == 429 {
             let retry_after_seconds = retry_after_seconds(response.headers());
             Err(SdkError::FaucetRateLimited {
@@ -173,28 +205,56 @@ impl FaucetClient {
 #[derive(Debug, Clone, serde::Serialize)]
 struct FundRequest {
     address: DAddr,
-    token: Option<Token>,
+    dgt_amount: u128,
+    drt_amount: u128,
 }
 
 impl FundRequest {
-    fn both(address: DAddr) -> Self {
+    fn new(address: DAddr, dgt_amount: u128, drt_amount: u128) -> Self {
         Self {
             address,
-            token: None,
-        }
-    }
-
-    fn single(address: DAddr, token: Token) -> Self {
-        Self {
-            address,
-            token: Some(token),
+            dgt_amount,
+            drt_amount,
         }
     }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-struct FundAmountResponse {
-    amount: u128,
+struct FaucetStatusResponse {
+    limits: FaucetLimits,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct FaucetLimits {
+    dgt: u128,
+    drt: u128,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FaucetCheckResponse {
+    can_request: bool,
+    time_until_next: Option<u64>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct FundResponse {
+    #[serde(default = "default_balance")]
+    balances: Balance,
+    #[serde(default)]
+    funded: FundedAmounts,
+}
+
+fn default_balance() -> Balance {
+    Balance { dgt: 0, drt: 0 }
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct FundedAmounts {
+    #[serde(default)]
+    dgt: u128,
+    #[serde(default)]
+    drt: u128,
 }
 
 fn retry_after_seconds(headers: &reqwest::header::HeaderMap) -> u64 {

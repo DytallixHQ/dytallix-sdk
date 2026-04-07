@@ -1,4 +1,5 @@
-use pqcrypto_dilithium::dilithium3;
+use fips204::ml_dsa_65;
+use fips204::traits::{SerDes, Verifier};
 use pqcrypto_sphincsplus::sphincsshake192ssimple;
 use pqcrypto_traits::sign::{
     DetachedSignature as DetachedSignatureTrait, PublicKey as PublicKeyTrait,
@@ -46,12 +47,10 @@ pub fn verify_mldsa65(
         });
     }
 
-    let public_key = <dilithium3::PublicKey as PublicKeyTrait>::from_bytes(pubkey)
-        .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))?;
-    let detached = <dilithium3::DetachedSignature as DetachedSignatureTrait>::from_bytes(signature)
-        .map_err(|err| DytallixError::InvalidSignature(err.to_string()))?;
+    let public_key = ml_dsa_65_public_key_from_bytes(pubkey)?;
+    let detached = ml_dsa_65_signature_from_bytes(signature)?;
 
-    Ok(dilithium3::verify_detached_signature(&detached, message, &public_key).is_ok())
+    Ok(public_key.verify(message, &detached, &[]))
 }
 
 /// Verifies an SLH-DSA-SHAKE-192s detached signature.
@@ -133,4 +132,26 @@ pub fn batch_verify_mldsa65(
     }
 
     Ok(results)
+}
+
+fn ml_dsa_65_public_key_from_bytes(
+    pubkey: &[u8],
+) -> Result<ml_dsa_65::PublicKey, DytallixError> {
+    let public_key = pubkey.try_into().map_err(|_| DytallixError::InvalidKeySize {
+        expected: MLDSA65_PUBLIC_KEY_BYTES,
+        got: pubkey.len(),
+    })?;
+    ml_dsa_65::PublicKey::try_from_bytes(public_key)
+        .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))
+}
+
+fn ml_dsa_65_signature_from_bytes(
+    signature: &[u8],
+) -> Result<[u8; ml_dsa_65::SIG_LEN], DytallixError> {
+    signature
+        .try_into()
+        .map_err(|_| DytallixError::InvalidSignatureSize {
+            expected: MLDSA65_SIGNATURE_BYTES,
+            got: signature.len(),
+        })
 }
