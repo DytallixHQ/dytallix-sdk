@@ -29,13 +29,12 @@ use dytallix_sdk::{FaucetStatus, KeystoreEntry, Token};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const TESTNET_ENDPOINT: &str = "https://testnet.dytallix.com";
-const LOCAL_ENDPOINT: &str = "http://localhost:8545";
-const MAINNET_ENDPOINT: &str = "https://mainnet.dytallix.com";
-const TESTNET_FAUCET: &str = "https://faucet.dytallix.com";
+const TESTNET_ENDPOINT: &str = "https://dytallix.com";
+const LOCAL_ENDPOINT: &str = "http://localhost:3030";
+const TESTNET_FAUCET: &str = "https://dytallix.com/api/faucet";
 const LOCAL_FAUCET: &str = "http://localhost:3004";
 const DISCORD_LINK: &str = "https://discord.gg/eyVvu5kmPG";
-const EXPLORER_LINK: &str = "https://explorer.dytallix.com";
+const EXPLORER_LINK: &str = "https://dytallix.com/build/blockchain";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct CliConfig {
@@ -64,7 +63,7 @@ impl std::fmt::Display for NetworkProfile {
 
 pub(crate) async fn configured_client() -> Result<DytallixClient> {
     let config = load_config()?;
-    let endpoint = network_endpoint(config.network);
+    let endpoint = network_endpoint(config.network)?;
     DytallixClient::new(endpoint)
         .await
         .map_err(humanize_sdk_error)
@@ -95,11 +94,13 @@ pub(crate) fn faucet_endpoint(profile: NetworkProfile) -> Result<&'static str> {
     }
 }
 
-pub(crate) fn network_endpoint(profile: NetworkProfile) -> &'static str {
+pub(crate) fn network_endpoint(profile: NetworkProfile) -> Result<&'static str> {
     match profile {
-        NetworkProfile::Testnet => TESTNET_ENDPOINT,
-        NetworkProfile::Mainnet => MAINNET_ENDPOINT,
-        NetworkProfile::Local => LOCAL_ENDPOINT,
+        NetworkProfile::Testnet => Ok(TESTNET_ENDPOINT),
+        NetworkProfile::Local => Ok(LOCAL_ENDPOINT),
+        NetworkProfile::Mainnet => Err(anyhow!(
+            "Mainnet is not publicly available yet. Switch to testnet with `dytallix config network testnet`."
+        )),
     }
 }
 
@@ -227,10 +228,14 @@ pub(crate) fn hex_to_bytes(raw: &str) -> Result<Vec<u8>> {
 
 pub(crate) async fn raw_get_json(path: &str) -> Result<Value> {
     let config = load_config()?;
-    let url = format!("{}{}", network_endpoint(config.network), path);
-    let response = reqwest::get(&url).await.map_err(|_| {
-        anyhow!("Cannot reach the Dytallix testnet at {url}. Check your network connection.")
-    })?;
+    raw_get_json_at(network_endpoint(config.network)?, path).await
+}
+
+pub(crate) async fn raw_get_json_at(endpoint: &str, path: &str) -> Result<Value> {
+    let url = format!("{endpoint}{path}");
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|_| anyhow!("Cannot reach {url}. Check your network connection."))?;
     if response.status().is_success() {
         response
             .json()
@@ -243,6 +248,12 @@ pub(crate) async fn raw_get_json(path: &str) -> Result<Value> {
             "Request to {url} failed with status {status}. {reason}"
         ))
     }
+}
+
+pub(crate) fn unsupported_public_gateway_read(command: &str, path: &str) -> anyhow::Error {
+    anyhow!(
+        "`{command}` is not available through the public website gateway. The current CLI flow expects `{path}`, but https://dytallix.com does not expose that route as public JSON. Use a direct node endpoint for that read or rely on the documented public routes at https://dytallix.com/docs."
+    )
 }
 
 pub(crate) async fn faucet_request(address: &DAddr, token_type: &str) -> Result<()> {
@@ -289,16 +300,16 @@ pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
 			required,
 			available,
 		} => anyhow!(
-			"Insufficient DRT for gas fees. Required: {} DRT. Available: {} DRT. Run dytallix faucet to get more.",
+			"Insufficient DRT balance. Required: {} DRT. Available: {} DRT.",
 			format_number(required),
 			format_number(available)
 		),
 		SdkError::InsufficientBalance {
-			token,
+			token: Token::DGT,
 			required,
 			available,
 		} => anyhow!(
-			"Insufficient balance for {token}. Required: {} {token}. Available: {} {token}.",
+			"Insufficient DGT for gas fees. Required: {} DGT. Available: {} DGT. Run dytallix faucet to get more.",
 			format_number(required),
 			format_number(available)
 		),
@@ -308,6 +319,10 @@ pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
 		SdkError::FaucetUnavailable { endpoint, .. } => anyhow!(
 			"Faucet is not reachable at {endpoint}. Check your network connection or try again later."
 		),
+		SdkError::NodeUnavailable { endpoint, reason }
+            if transaction_api_unavailable(&endpoint, &reason) => anyhow!(
+            "The Dytallix testnet transaction API is not available at {endpoint}. Faucet and balance reads may still work, but transaction simulation and submission are not exposed from this endpoint yet."
+        ),
 		SdkError::NodeUnavailable { endpoint, .. } => anyhow!(
 			"Cannot reach the Dytallix testnet at {endpoint}. Check your network connection."
 		),
@@ -315,6 +330,9 @@ pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
 		SdkError::Network(message) => anyhow!("Network error: {message}"),
 		SdkError::Io(err) => anyhow!("I/O error: {err}"),
 		SdkError::Serialization(message) => anyhow!("Serialization error: {message}"),
+		SdkError::TransactionRejected(message) if looks_like_gateway_html(&message) => anyhow!(
+            "The Dytallix testnet transaction API returned a gateway or HTML response instead of transaction JSON. Transaction submission is not usable from the current endpoint."
+        ),
 		SdkError::TransactionRejected(message) => anyhow!("Transaction rejected: {message}"),
 		SdkError::ContractDeployFailed(message) => anyhow!("Contract deployment failed: {message}"),
 		SdkError::KeystoreCorrupt(message) => anyhow!("Keystore corrupt: {message}"),
@@ -323,6 +341,23 @@ pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
 			"Insufficient gas: required {required} units but only {provided} were provided. Increase the gas limit and try again."
 		),
 	}
+}
+
+fn transaction_api_unavailable(endpoint: &str, reason: &str) -> bool {
+    let lower_reason = reason.to_ascii_lowercase();
+    (endpoint.contains("/transactions")
+        || endpoint.contains("/simulate")
+        || endpoint.contains("/api/blockchain/submit"))
+        && (lower_reason.contains("405 not allowed")
+            || lower_reason.contains("404 not found")
+            || lower_reason.contains("cannot post")
+            || lower_reason.contains("<html")
+            || lower_reason.contains("<!doctype html"))
+}
+
+fn looks_like_gateway_html(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("<html") || lower.contains("<!doctype html")
 }
 
 pub(crate) fn map_keystore_error(error: SdkError) -> anyhow::Error {
@@ -383,7 +418,11 @@ fn decode_hex_nibble(ch: char) -> Result<u8> {
 mod tests {
     use dytallix_sdk::error::SdkError;
 
-    use super::{faucet_balance_timeout, humanize_sdk_error, keystore_not_found_message};
+    use super::{
+        faucet_balance_timeout, faucet_endpoint, humanize_sdk_error, keystore_not_found_message,
+        network_endpoint, unsupported_public_gateway_read, NetworkProfile, LOCAL_ENDPOINT,
+        TESTNET_ENDPOINT, TESTNET_FAUCET,
+    };
     use dytallix_core::address::DAddr;
     use dytallix_core::keypair::DytallixKeypair;
 
@@ -396,16 +435,47 @@ mod tests {
         assert!(rate_limited.contains("Try again in 17 seconds"));
 
         let node_unavailable = humanize_sdk_error(SdkError::NodeUnavailable {
-            endpoint: "https://testnet.dytallix.com".to_owned(),
+            endpoint: "https://dytallix.com".to_owned(),
             reason: "offline".to_owned(),
         })
         .to_string();
         assert!(node_unavailable.contains("Check your network connection"));
+
+        let tx_api_unavailable = humanize_sdk_error(SdkError::NodeUnavailable {
+            endpoint: "https://dytallix.com/api/blockchain/submit".to_owned(),
+            reason: "<html><h1>405 Not Allowed</h1></html>".to_owned(),
+        })
+        .to_string();
+        assert!(tx_api_unavailable.contains("transaction API is not available"));
 
         assert!(keystore_not_found_message().contains("Run dytallix init"));
 
         let address = DAddr::from_public_key(DytallixKeypair::generate().public_key()).unwrap();
         let timeout = faucet_balance_timeout(&address).to_string();
         assert!(timeout.contains("discord.gg/eyVvu5kmPG"));
+    }
+
+    #[test]
+    fn network_profiles_use_public_surface_defaults() {
+        assert_eq!(
+            network_endpoint(NetworkProfile::Testnet).unwrap(),
+            TESTNET_ENDPOINT
+        );
+        assert_eq!(
+            network_endpoint(NetworkProfile::Local).unwrap(),
+            LOCAL_ENDPOINT
+        );
+        assert_eq!(
+            faucet_endpoint(NetworkProfile::Testnet).unwrap(),
+            TESTNET_FAUCET
+        );
+    }
+
+    #[test]
+    fn unsupported_public_gateway_message_is_actionable() {
+        let message =
+            unsupported_public_gateway_read("contract query", "/v1/contracts").to_string();
+        assert!(message.contains("https://dytallix.com"));
+        assert!(message.contains("direct node endpoint"));
     }
 }

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
 
-use crate::commands::raw_get_json;
+use crate::commands::{raw_get_json_at, LOCAL_ENDPOINT};
 use crate::output;
 use dytallix_sdk::client::DytallixClient;
 
@@ -71,7 +71,7 @@ async fn status() -> Result<()> {
 }
 
 async fn peers() -> Result<()> {
-    let value = raw_get_json("/v1/node/peers").await?;
+    let value = raw_get_json_at(LOCAL_ENDPOINT, "/peers").await?;
     output::section("Peers");
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
