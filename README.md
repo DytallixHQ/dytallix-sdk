@@ -123,6 +123,15 @@ See [Getting started](docs/getting-started.md) and the
 - [FAQ](docs/faq.md) - operational and product questions
 - [Examples](examples/README.md) - runnable examples and prerequisites
 
+## Download
+
+- GitHub Releases: https://github.com/DytallixHQ/dytallix-sdk/releases
+- Build from source: `cargo build --release --bin dytallix`
+- Install from GitHub: `cargo install --git https://github.com/DytallixHQ/dytallix-sdk.git dytallix-cli --bin dytallix`
+
+Release tags matching `v*` build downloadable CLI archives for Linux, macOS
+(Intel and Apple Silicon), and Windows through GitHub Actions.
+
 ## DytallixHQ Repositories
 
 - [dytallix-sdk](https://github.com/DytallixHQ/dytallix-sdk) - this repository
@@ -137,6 +146,6 @@ See [Getting started](docs/getting-started.md) and the
 - [Documentation site](https://dytallix.com/docs)
 - [Whitepapers](https://dytallix.com)
 - [Discord](https://discord.gg/eyVvu5kmPG)
-- [Explorer app](https://explorer.dytallix.com)
+- [Explorer app](https://dytallix.com/build/blockchain)
 - [Faucet API](https://dytallix.com/api/faucet)
 - [GitHub organization](https://github.com/DytallixHQ)

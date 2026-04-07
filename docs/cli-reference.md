@@ -103,6 +103,12 @@ dytallix stake delegate <validator> 1000
 dytallix stake status
 ```
 
+Current public behavior:
+
+- `status` reads `https://dytallix.com/api/staking/balance/<D-ADDR>`
+- `delegate`, `undelegate`, and `claim` submit signed transactions through the
+  active node endpoint
+
 ### `governance`
 
 Subcommands:
@@ -118,6 +124,11 @@ Examples:
 dytallix governance proposals
 dytallix governance vote 7 yes
 ```
+
+Current public behavior:
+
+- `proposals` reads `https://dytallix.com/api/governance/proposals`
+- `status <id>` filters the public proposals list and prints the matching item
 
 ### `contract`
 
@@ -136,6 +147,14 @@ dytallix contract deploy ./my_contract.wasm
 dytallix contract query <contract> get_count
 ```
 
+Current public behavior:
+
+- `deploy` and `call` submit signed transactions
+- `info <address>` reads `https://dytallix.com/api/contracts` and filters for
+  the requested address
+- `query` and `events` require a direct node endpoint because the public website
+  gateway does not expose the legacy contract JSON routes the CLI would need
+
 ### `chain`
 
 Subcommands:
@@ -152,6 +171,11 @@ dytallix chain status
 dytallix chain block latest
 ```
 
+Current public behavior:
+
+- `status`, `block`, and `epoch` use public root RPC reads
+- `params` derives the public chain ID and gas schedule from `/status`
+
 ### `node`
 
 Subcommands:
@@ -164,6 +188,12 @@ Subcommands:
 
 The `start` and `stop` commands look for local helper scripts such as
 `start-local.sh` and `stop-local.sh` relative to the current directory.
+
+Current public behavior:
+
+- `status` uses the local node profile on `http://localhost:3030`
+- `peers` reads the local-only `/peers` route directly from
+  `http://localhost:3030/peers`
 
 ### `crypto`
 
@@ -202,7 +232,7 @@ Subcommands:
 
 - `show`
 - `set <key> <value>`
-- `network <testnet|mainnet|local>`
+- `network <testnet|local>`
 - `reset`
 
 Examples:
@@ -217,8 +247,10 @@ dytallix config network local
 The CLI resolves endpoints from the active network profile:
 
 - `testnet` -> `https://dytallix.com`
-- `mainnet` -> `https://mainnet.dytallix.com`
-- `local` -> `http://localhost:8545`
+- `local` -> `http://localhost:3030`
+
+The public CLI currently exposes only `testnet` and `local` through
+`dytallix config network`.
 
 For faucet behavior and other operational notes, see [Core concepts](core-concepts.md)
 and [FAQ](faq.md).

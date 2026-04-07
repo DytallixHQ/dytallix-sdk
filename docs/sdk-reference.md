@@ -51,7 +51,7 @@ These come from [`dytallix-core`](../crates/dytallix-core/src/lib.rs).
 | `Token` | Canonical DGT and DRT token enum | [`lib.rs`](../crates/dytallix-sdk/src/lib.rs) |
 | `Balance` | DGT and DRT balances for one account | [`lib.rs`](../crates/dytallix-sdk/src/lib.rs) |
 | `AccountState` | Address, pubkey hash, balance, nonce, and scheme | [`lib.rs`](../crates/dytallix-sdk/src/lib.rs) |
-| `FeeEstimate` | Compute and bandwidth gas split, all denominated in DRT | [`lib.rs`](../crates/dytallix-sdk/src/lib.rs) |
+| `FeeEstimate` | Compute and bandwidth gas split, reported in micro-denominated network fees | [`lib.rs`](../crates/dytallix-sdk/src/lib.rs) |
 | `TransactionReceipt` | Submitted transaction status and charged fee | [`lib.rs`](../crates/dytallix-sdk/src/lib.rs) |
 | `Block`, `ChainStatus`, `Validator`, `Delegation` | Read models for node responses | [`lib.rs`](../crates/dytallix-sdk/src/lib.rs) |
 | `FaucetStatus` | Faucet eligibility and retry window | [`lib.rs`](../crates/dytallix-sdk/src/lib.rs) |
@@ -111,6 +111,11 @@ use dytallix_sdk::faucet::FaucetClient;
 let client = DytallixClient::testnet().await?;
 let faucet = FaucetClient::testnet();
 ```
+
+The public website gateway supports the account, balance, block, transaction,
+fee-estimation, faucet, and submission flows used by the shipped examples.
+Validator and delegation reads still require a direct node endpoint today
+because the public website gateway does not expose those legacy JSON routes.
 
 ### Keystore
 

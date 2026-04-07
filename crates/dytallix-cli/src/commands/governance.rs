@@ -55,7 +55,7 @@ pub async fn run(args: GovernanceArgs) -> Result<()> {
 }
 
 async fn proposals() -> Result<()> {
-    let value = raw_get_json("/v1/governance/proposals").await?;
+    let value = raw_get_json("/api/governance/proposals").await?;
     output::section("Governance proposals");
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
@@ -79,7 +79,10 @@ async fn vote(id: u64, choice: VoteChoice) -> Result<()> {
         .data(format!("governance:vote:{id}:{}", vote_choice_label(choice)).into_bytes())
         .build()
         .map_err(|err| anyhow!(err.to_string()))?;
-    let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
+    let (tx, fee) = tx
+        .with_estimated_fee(&client)
+        .await
+        .map_err(humanize_sdk_error)?;
     output::fee_breakdown(&fee);
     let signed = tx.sign(&keypair).map_err(humanize_sdk_error)?;
     let receipt = client
@@ -109,7 +112,10 @@ async fn propose() -> Result<()> {
         .data(b"governance:propose".to_vec())
         .build()
         .map_err(|err| anyhow!(err.to_string()))?;
-    let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
+    let (tx, fee) = tx
+        .with_estimated_fee(&client)
+        .await
+        .map_err(humanize_sdk_error)?;
     output::fee_breakdown(&fee);
     let signed = tx.sign(&keypair).map_err(humanize_sdk_error)?;
     let receipt = client
@@ -122,9 +128,21 @@ async fn propose() -> Result<()> {
 }
 
 async fn status(id: u64) -> Result<()> {
-    let value = raw_get_json(&format!("/v1/governance/proposals/{id}")).await?;
+    let value = raw_get_json("/api/governance/proposals").await?;
+    let proposal = value
+        .get("proposals")
+        .and_then(|proposals| proposals.as_array())
+        .and_then(|proposals| {
+            proposals
+                .iter()
+                .find(|proposal| proposal.get("id").and_then(|raw| raw.as_u64()) == Some(id))
+        })
+        .cloned()
+        .ok_or_else(|| {
+            anyhow!("Governance proposal {id} was not found through the public proposals API.")
+        })?;
     output::section("Governance status");
-    println!("{}", serde_json::to_string_pretty(&value)?);
+    println!("{}", serde_json::to_string_pretty(&proposal)?);
     Ok(())
 }
 
