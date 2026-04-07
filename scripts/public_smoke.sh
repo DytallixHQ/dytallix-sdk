@@ -27,11 +27,7 @@ case "$MODE" in
       "$ROOT/examples/contracts/minimal_contract/target/wasm32-unknown-unknown/release/minimal_contract.wasm"
     ;;
   contract-lifecycle)
-    endpoint="${DYTALLIX_ENDPOINT:-}"
-    if [[ -z "$endpoint" ]]; then
-      echo "Set DYTALLIX_ENDPOINT to a node exposing /contracts/* and /api/contracts/* routes." >&2
-      exit 1
-    fi
+    endpoint="${DYTALLIX_ENDPOINT:-https://www.dytallix.com}"
     export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}"
     rustup target add wasm32-unknown-unknown
     cargo build --bin dytallix

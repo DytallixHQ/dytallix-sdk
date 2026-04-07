@@ -39,14 +39,13 @@ jobs:
         run: bash scripts/public_smoke.sh contract-deploy
 
   contract-lifecycle:
-    if: ${{ secrets.DYTALLIX_DIRECT_ENDPOINT != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      DYTALLIX_ENDPOINT: ${{ secrets.DYTALLIX_DIRECT_ENDPOINT }}
+      DYTALLIX_ENDPOINT: https://www.dytallix.com
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Verify contract lifecycle against direct node endpoint
+      - name: Verify contract lifecycle against live public gateway
         run: bash scripts/public_smoke.sh contract-lifecycle
