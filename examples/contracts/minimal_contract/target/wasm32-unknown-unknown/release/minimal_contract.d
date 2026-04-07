@@ -1,1 +1,0 @@
-/private/tmp/dytallix-sdk-merge/examples/contracts/minimal_contract/target/wasm32-unknown-unknown/release/minimal_contract.wasm: /private/tmp/dytallix-sdk-merge/examples/contracts/minimal_contract/src/lib.rs
