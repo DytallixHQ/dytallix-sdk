@@ -4,13 +4,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
-
-use dytallix_sdk::transaction::TransactionBuilder;
-use dytallix_sdk::Token;
+use serde_json::json;
 
 use crate::commands::{
-    active_entry, active_keypair, configured_client, display_path, humanize_sdk_error,
-    load_keystore, raw_get_json, read_bytes, unsupported_public_gateway_read, validate_address,
+    active_entry, bytes_to_hex, display_path, hex_to_bytes, load_keystore, raw_get_json,
+    raw_post_json, read_bytes,
 };
 use crate::output;
 
@@ -67,115 +65,74 @@ pub async fn run(args: ContractArgs) -> Result<()> {
 async fn deploy(wasm_file: PathBuf) -> Result<()> {
     let wasm = validated_wasm_bytes(&wasm_file)?;
     let keystore = load_keystore()?;
-    let sender = active_entry(&keystore)?.address.clone();
-    let keypair = active_keypair(&keystore)?;
-    let client = configured_client().await?;
-    let account = client
-        .get_account(&sender)
-        .await
-        .map_err(humanize_sdk_error)?;
-
-    let mut data = b"contract:deploy:".to_vec();
-    data.extend_from_slice(&wasm);
-    let tx = TransactionBuilder::new()
-        .from(sender.clone())
-        .to(sender)
-        .amount(0, Token::DRT)
-        .nonce(account.nonce)
-        .data(data)
-        .build()
-        .map_err(|err| anyhow!(err.to_string()))?;
-    let (tx, fee) = tx
-        .with_estimated_fee(&client)
-        .await
-        .map_err(humanize_sdk_error)?;
-    output::fee_breakdown(&fee);
-    let signed = tx.sign(&keypair).map_err(humanize_sdk_error)?;
-    let tx_hash = signed.hash();
-    let receipt = client
-        .submit_transaction(&signed)
-        .await
-        .map_err(humanize_sdk_error)?;
-
-    output::tx_hash(&receipt.hash);
-    println!("Contract address: predicted-{}", &tx_hash[..16]);
+    let sender = active_entry(&keystore)?.address.to_string();
+    let value = raw_post_json(
+        "/contracts/deploy",
+        &json!({
+            "deployer": sender,
+            "code": bytes_to_hex(&wasm),
+            "gas_limit": 1_000_000u64,
+        }),
+    )
+    .await?;
+    if let Some(tx_hash) = value.get("tx_hash").and_then(|raw| raw.as_str()) {
+        output::tx_hash(tx_hash);
+    }
+    if let Some(address) = value.get("address").and_then(|raw| raw.as_str()) {
+        println!("Contract address: {address}");
+    }
     output::success("Contract deployment submitted", None);
     Ok(())
 }
 
 async fn call(address: String, method: String, args: Vec<String>) -> Result<()> {
-    let contract = validate_address(&address)?;
-    let keystore = load_keystore()?;
-    let sender = active_entry(&keystore)?.address.clone();
-    let keypair = active_keypair(&keystore)?;
-    let client = configured_client().await?;
-    let account = client
-        .get_account(&sender)
-        .await
-        .map_err(humanize_sdk_error)?;
-
-    let tx = TransactionBuilder::new()
-        .from(sender)
-        .to(contract)
-        .amount(0, Token::DRT)
-        .nonce(account.nonce)
-        .data(format!("contract:call:{method}:{}", args.join(",")).into_bytes())
-        .build()
-        .map_err(|err| anyhow!(err.to_string()))?;
-    let (tx, fee) = tx
-        .with_estimated_fee(&client)
-        .await
-        .map_err(humanize_sdk_error)?;
-    output::fee_breakdown(&fee);
-    let signed = tx.sign(&keypair).map_err(humanize_sdk_error)?;
-    let receipt = client
-        .submit_transaction(&signed)
-        .await
-        .map_err(humanize_sdk_error)?;
-    output::tx_hash(&receipt.hash);
-    output::success("Contract call submitted", None);
+    let contract = validate_contract_address(&address)?;
+    let value = raw_post_json(
+        "/contracts/call",
+        &json!({
+            "address": contract,
+            "method": method,
+            "args": encode_contract_args(&args),
+            "gas_limit": 1_000_000u64,
+        }),
+    )
+    .await?;
+    if let Some(tx_hash) = value.get("tx_hash").and_then(|raw| raw.as_str()) {
+        output::tx_hash(tx_hash);
+    }
+    output::section("Contract call");
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    output::success("Contract call executed", None);
     Ok(())
 }
 
 async fn query(address: String, method: String, args: Vec<String>) -> Result<()> {
-    let contract = validate_address(&address)?;
-    let path = if args.is_empty() {
-        format!("/v1/contracts/{contract}/query/{method}")
-    } else {
-        format!("/v1/contracts/{contract}/query/{method}?args=<hex-encoded>")
-    };
-    Err(unsupported_public_gateway_read("contract query", &path))
+    let contract = validate_contract_address(&address)?;
+    let mut path = format!("/api/contracts/{contract}/query/{method}");
+    let encoded_args = encode_contract_args(&args);
+    if !encoded_args.is_empty() {
+        path.push_str(&format!("?args={encoded_args}"));
+    }
+    let value = raw_get_json(&path).await?;
+    output::section("Contract query");
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
 }
 
 async fn info(address: String) -> Result<()> {
-    let contract = validate_address(&address)?;
-    let value = raw_get_json("/api/contracts").await?;
-    let contract_info = value
-        .get("contracts")
-        .and_then(|contracts| contracts.as_array())
-        .and_then(|contracts| {
-            contracts.iter().find(|entry| {
-                entry.get("address").and_then(|raw| raw.as_str()) == Some(contract.as_str())
-            })
-        })
-        .cloned()
-        .ok_or_else(|| {
-            anyhow!(
-                "Contract {} was not found through the public contracts API.",
-                contract.as_str()
-            )
-        })?;
+    let contract = validate_contract_address(&address)?;
+    let contract_info = raw_get_json(&format!("/api/contracts/{contract}")).await?;
     output::section("Contract info");
     println!("{}", serde_json::to_string_pretty(&contract_info)?);
     Ok(())
 }
 
 async fn events(address: String) -> Result<()> {
-    let contract = validate_address(&address)?;
-    Err(unsupported_public_gateway_read(
-        "contract events",
-        &format!("/v1/contracts/{contract}/events"),
-    ))
+    let contract = validate_contract_address(&address)?;
+    let value = raw_get_json(&format!("/api/contracts/{contract}/events")).await?;
+    output::section("Contract events");
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
 }
 
 fn validated_wasm_bytes(path: &Path) -> Result<Vec<u8>> {
@@ -194,4 +151,24 @@ fn validated_wasm_bytes(path: &Path) -> Result<Vec<u8>> {
         ));
     }
     Ok(bytes)
+}
+
+fn validate_contract_address(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    let hex = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+    if hex.len() != 40 {
+        return Err(anyhow!(
+            "Invalid contract address `{trimmed}`. Expected a 0x-prefixed 20-byte hex address."
+        ));
+    }
+    hex_to_bytes(hex)?;
+    Ok(format!("0x{hex}"))
+}
+
+fn encode_contract_args(args: &[String]) -> String {
+    if args.is_empty() {
+        String::new()
+    } else {
+        bytes_to_hex(args.join(",").as_bytes())
+    }
 }

@@ -30,7 +30,7 @@ dytallix --help
 | `faucet` | Request faucet funds or inspect eligibility | `dytallix faucet status` |
 | `stake` | Delegate, undelegate, claim rewards, or view delegation state | `dytallix stake status` |
 | `governance` | Query proposals or submit votes and proposals | `dytallix governance proposals` |
-| `contract` | Deploy, call, query, and inspect contracts | `dytallix contract info <daddr>` |
+| `contract` | Deploy, call, query, and inspect contracts | `dytallix contract info <address>` |
 | `node` | Operate or inspect a local node workflow | `dytallix node status` |
 | `chain` | Query block, epoch, status, and chain params | `dytallix chain status` |
 | `crypto` | Key generation, signing, verification, and keystore inspection | `dytallix crypto keygen` |
@@ -149,11 +149,13 @@ dytallix contract query <contract> get_count
 
 Current public behavior:
 
-- `deploy` and `call` submit signed transactions
-- `info <address>` reads `https://dytallix.com/api/contracts` and filters for
-  the requested address
-- `query` and `events` require a direct node endpoint because the public website
-  gateway does not expose the legacy contract JSON routes the CLI would need
+- `deploy` posts WASM bytes to `https://dytallix.com/contracts/deploy`
+- `call` posts method execution requests to `https://dytallix.com/contracts/call`
+- `info <address>` reads `https://dytallix.com/api/contracts/<address>`
+- `query` reads `https://dytallix.com/api/contracts/<address>/query/<method>`
+- `events` reads `https://dytallix.com/api/contracts/<address>/events`
+- for a direct node endpoint or a local node, set `DYTALLIX_ENDPOINT` or run
+  `dytallix config set endpoint http://localhost:3030`
 
 ### `chain`
 
@@ -251,6 +253,19 @@ The CLI resolves endpoints from the active network profile:
 
 The public CLI currently exposes only `testnet` and `local` through
 `dytallix config network`.
+
+For direct-node testing, contract lifecycle reads, or a custom RPC base, you
+can override the active profile endpoint:
+
+```bash
+dytallix config set endpoint http://localhost:3030
+```
+
+Or for a one-off shell session:
+
+```bash
+export DYTALLIX_ENDPOINT=http://localhost:3030
+```
 
 For faucet behavior and other operational notes, see [Core concepts](core-concepts.md)
 and [FAQ](faq.md).
