@@ -330,9 +330,7 @@ where
     let mut convergence = DeployConvergence::default();
 
     loop {
-        if !convergence.tx_visible
-            && services.get_json(&format!("/tx/{tx_hash}")).await.is_ok()
-        {
+        if !convergence.tx_visible && services.get_json(&format!("/tx/{tx_hash}")).await.is_ok() {
             convergence.tx_visible = true;
         }
         if !convergence.contract_visible
@@ -410,13 +408,17 @@ mod tests {
 
     #[test]
     fn contract_address_validation_accepts_prefixed_hex() {
-        let address = validate_contract_address("0x9a9671441249ee2c364f9b4bc8049e61b082449a").unwrap();
+        let address =
+            validate_contract_address("0x9a9671441249ee2c364f9b4bc8049e61b082449a").unwrap();
         assert_eq!(address, "0x9a9671441249ee2c364f9b4bc8049e61b082449a");
     }
 
     #[test]
     fn contract_args_are_hex_encoded() {
-        assert_eq!(encode_contract_args(&["hello".to_owned(), "7".to_owned()]), "68656c6c6f2c37");
+        assert_eq!(
+            encode_contract_args(&["hello".to_owned(), "7".to_owned()]),
+            "68656c6c6f2c37"
+        );
     }
 
     #[tokio::test]
@@ -448,7 +450,10 @@ mod tests {
         let mut services = MockDeployConfirmationServices::default();
         services.push_err("/tx/0xabc", "pending");
         services.push_err("/tx/0xabc", "pending");
-        services.push_ok("/tx/0xabc", json!({ "tx_hash": "0xabc", "status": "Success" }));
+        services.push_ok(
+            "/tx/0xabc",
+            json!({ "tx_hash": "0xabc", "status": "Success" }),
+        );
 
         services.push_err("/api/contracts/0xdef", "missing");
         services.push_ok("/api/contracts/0xdef", json!({ "address": "0xdef" }));

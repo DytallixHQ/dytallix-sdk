@@ -134,13 +134,13 @@ pub fn batch_verify_mldsa65(
     Ok(results)
 }
 
-fn ml_dsa_65_public_key_from_bytes(
-    pubkey: &[u8],
-) -> Result<ml_dsa_65::PublicKey, DytallixError> {
-    let public_key = pubkey.try_into().map_err(|_| DytallixError::InvalidKeySize {
-        expected: MLDSA65_PUBLIC_KEY_BYTES,
-        got: pubkey.len(),
-    })?;
+fn ml_dsa_65_public_key_from_bytes(pubkey: &[u8]) -> Result<ml_dsa_65::PublicKey, DytallixError> {
+    let public_key = pubkey
+        .try_into()
+        .map_err(|_| DytallixError::InvalidKeySize {
+            expected: MLDSA65_PUBLIC_KEY_BYTES,
+            got: pubkey.len(),
+        })?;
     ml_dsa_65::PublicKey::try_from_bytes(public_key)
         .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))
 }

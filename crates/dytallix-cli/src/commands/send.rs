@@ -7,10 +7,12 @@ use dytallix_sdk::transaction::TransactionBuilder;
 use dytallix_sdk::Token;
 
 use crate::commands::{
-    active_entry, active_keypair, configured_client, format_number, humanize_sdk_error,
-    load_keystore, validate_address,
+    active_entry, active_keypair, configured_client, format_micro_amount, format_number,
+    humanize_sdk_error, load_keystore, validate_address,
 };
 use crate::output;
+
+const MICROS_PER_TOKEN: u128 = 1_000_000;
 
 /// Arguments for the `send` command.
 #[derive(Debug, Clone, Args)]
@@ -82,11 +84,14 @@ pub async fn run(args: SendArgs) -> Result<()> {
         .build()
         .map_err(|err| anyhow!(err.to_string()))?;
     let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
-    if account.balance.drt < fee.total_cost_drt {
+
+    let required_fee_micro = fee.total_cost_drt;
+    let available_fee_micro = account.balance.dgt.saturating_mul(MICROS_PER_TOKEN);
+    if available_fee_micro < required_fee_micro {
         return Err(anyhow!(
-			"Insufficient DRT for gas fees. Required: {} DRT. Available: {} DRT. Run dytallix faucet to get more.",
-			format_number(fee.total_cost_drt),
-			format_number(account.balance.drt)
+			"Insufficient DGT for gas fees. Required: {} DGT. Available: {} DGT. Run dytallix faucet to get more.",
+			format_micro_amount(required_fee_micro),
+			format_number(account.balance.dgt)
 		));
     }
 

@@ -23,8 +23,8 @@ The SDK models two canonical tokens:
 
 | Token | Purpose |
 | --- | --- |
-| `DGT` | Governance and delegation |
-| `DRT` | Gas fees, rewards, and burns |
+| `DGT` | Governance, delegation, and gas fees |
+| `DRT` | Rewards and burns |
 
 Relevant types:
 
@@ -61,7 +61,7 @@ Default behavior:
 
 - Compute gas defaults to `21_000`
 - Bandwidth gas defaults to `data.len() as u64`
-- Fees are always denominated in DRT
+- Fees are always denominated in DGT micro-units.
 
 The fee estimate is represented by
 [`FeeEstimate`](../crates/dytallix-sdk/src/lib.rs) and split into compute and
