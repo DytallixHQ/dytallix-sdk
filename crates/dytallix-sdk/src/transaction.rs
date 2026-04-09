@@ -354,7 +354,7 @@ fn estimate_gas_components(messages: &[Message]) -> (u64, u64) {
 }
 
 fn legacy_storage_addresses(messages: &[Message]) -> (&str, &str) {
-    let Some(first_sender) = messages.first().map(Message::from_address) else {
+    let Some(first_sender) = messages.first().map(Message::sender_address) else {
         return ("", "");
     };
 
@@ -381,7 +381,7 @@ fn message_execution_gas(message: &Message) -> u64 {
 }
 
 impl Message {
-    fn from_address(&self) -> &str {
+    fn sender_address(&self) -> &str {
         match self {
             Self::Send { from, .. } => from,
             Self::Data { from, .. } => from,
