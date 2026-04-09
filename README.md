@@ -132,6 +132,40 @@ See [Getting started](docs/getting-started.md) and the
 Release tags matching `v*` build downloadable CLI archives for Linux, macOS
 (Intel and Apple Silicon), and Windows through GitHub Actions.
 
+## First Keypair
+
+The default `dytallix-sdk` crate now supports the shortest path to a real
+post-quantum identity:
+
+```rust
+use dytallix_sdk::{DAddr, DytallixKeypair};
+
+fn main() {
+    let keypair = DytallixKeypair::generate();
+    let addr = DAddr::from_public_key(keypair.public_key()).unwrap();
+    println!("{addr}");
+}
+```
+
+Add it to a project with:
+
+```bash
+cargo add dytallix-sdk
+```
+
+For network client and faucet support, enable the `network` feature:
+
+```bash
+cargo add dytallix-sdk --features network
+```
+
+Repository examples:
+
+```bash
+cargo run -p dytallix-sdk --example first-keypair
+cargo run -p dytallix-sdk --features network --example first-transaction
+```
+
 ## DytallixHQ Repositories
 
 - [dytallix-sdk](https://github.com/DytallixHQ/dytallix-sdk) - this repository
