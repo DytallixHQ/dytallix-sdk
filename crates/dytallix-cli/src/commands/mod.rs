@@ -251,7 +251,7 @@ pub(crate) fn bytes_to_hex(bytes: &[u8]) -> String {
 
 pub(crate) fn hex_to_bytes(raw: &str) -> Result<Vec<u8>> {
     let trimmed = raw.trim();
-    if trimmed.len() % 2 != 0 {
+    if !trimmed.len().is_multiple_of(2) {
         return Err(anyhow!(
             "Invalid hex input. Provide an even number of characters."
         ));
