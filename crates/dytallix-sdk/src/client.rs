@@ -1,10 +1,12 @@
 //! Asynchronous HTTP client for Dytallix node APIs.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use reqwest::Url;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use tokio::time::sleep;
 
 use crate::error::SdkError;
 use crate::transaction::{SignedTransaction, Transaction};
@@ -15,6 +17,8 @@ use crate::{
 use dytallix_core::address::DAddr;
 
 const DEFAULT_PUBLIC_MIN_GAS_PRICE: u64 = 1_000;
+const PUBLIC_TESTNET_ENDPOINT: &str = "https://dytallix.com";
+const LOCAL_NODE_ENDPOINT: &str = "http://localhost:3030";
 
 /// Asynchronous client for interacting with Dytallix nodes.
 #[derive(Debug, Clone)]
@@ -39,12 +43,12 @@ impl DytallixClient {
 
     /// Creates a client for the canonical Dytallix testnet node.
     pub async fn testnet() -> Result<Self, SdkError> {
-        Self::new("https://dytallix.com").await
+        Self::new(PUBLIC_TESTNET_ENDPOINT).await
     }
 
     /// Creates a client for a local Dytallix node.
     pub async fn local() -> Result<Self, SdkError> {
-        Self::new("http://localhost:3030").await
+        Self::new(LOCAL_NODE_ENDPOINT).await
     }
 
     /// Fetches the current account state for the provided address.
@@ -101,6 +105,7 @@ impl DytallixClient {
         tx: &SignedTransaction,
     ) -> Result<TransactionReceipt, SdkError> {
         let url = self.url("/api/blockchain/submit")?;
+        let tx_hash = tx.hash();
         let response = self
             .http
             .post(url.clone())
@@ -126,6 +131,9 @@ impl DytallixClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "request rejected".to_owned());
+            if let Some(receipt) = self.lookup_submitted_transaction(&tx_hash).await {
+                return Ok(receipt);
+            }
             Err(SdkError::TransactionRejected(reason))
         }
     }
@@ -138,11 +146,22 @@ impl DytallixClient {
 
     /// Fetches the active validator set.
     pub async fn get_validators(&self) -> Result<Vec<Validator>, SdkError> {
+        if self.uses_public_testnet_gateway() {
+            return Err(
+                self.legacy_public_read_unavailable("/v1/validators", "validator-set reads")
+            );
+        }
         self.get_json("/v1/validators").await
     }
 
     /// Fetches delegations for the provided delegator address.
     pub async fn get_delegations(&self, address: &DAddr) -> Result<Vec<Delegation>, SdkError> {
+        if self.uses_public_testnet_gateway() {
+            return Err(self.legacy_public_read_unavailable(
+                &format!("/v1/delegations/{address}"),
+                "delegation reads",
+            ));
+        }
         self.get_json(&format!("/v1/delegations/{address}")).await
     }
 
@@ -186,6 +205,29 @@ impl DytallixClient {
         Ok(NetworkGasParams {
             min_gas_price: gas.min_gas_price.max(DEFAULT_PUBLIC_MIN_GAS_PRICE),
         })
+    }
+
+    fn uses_public_testnet_gateway(&self) -> bool {
+        self.endpoint == PUBLIC_TESTNET_ENDPOINT
+    }
+
+    fn legacy_public_read_unavailable(&self, path: &str, feature: &str) -> SdkError {
+        SdkError::NodeUnavailable {
+            endpoint: format!("{}{}", self.endpoint, path),
+            reason: format!(
+                "{feature} are not exposed as public JSON routes on the website gateway. Connect the SDK to a direct node endpoint that serves `{path}` or use the documented public routes at https://dytallix.com/docs."
+            ),
+        }
+    }
+
+    async fn lookup_submitted_transaction(&self, hash: &str) -> Option<TransactionReceipt> {
+        for _ in 0..3 {
+            sleep(Duration::from_millis(750)).await;
+            if let Ok(receipt) = self.get_transaction(hash).await {
+                return Some(receipt);
+            }
+        }
+        None
     }
 }
 
@@ -258,7 +300,7 @@ struct SubmittedTransaction {
 
 #[derive(Debug, serde::Deserialize)]
 struct TransactionReceiptResponse {
-    #[serde(rename = "tx_hash")]
+    #[serde(alias = "hash", rename = "tx_hash")]
     hash: String,
     #[serde(
         rename = "block_height",
@@ -327,35 +369,71 @@ fn decode_micro_balance(balances: &BTreeMap<String, serde_json::Value>, denom: &
     }
 }
 
-fn deserialize_u128_string<'de, D>(deserializer: D) -> Result<u128, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    match serde_json::Value::deserialize(deserializer)? {
-        serde_json::Value::String(raw) => raw.parse::<u128>().map_err(serde::de::Error::custom),
-        serde_json::Value::Number(number) => number
-            .as_u64()
-            .map(u128::from)
-            .ok_or_else(|| serde::de::Error::custom("invalid numeric fee value")),
-        serde_json::Value::Null => Ok(0),
-        other => Err(serde::de::Error::custom(format!(
-            "unexpected fee value: {other}"
-        ))),
-    }
-}
-
 fn deserialize_u64_or_default<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    match serde_json::Value::deserialize(deserializer)? {
-        serde_json::Value::Null => Ok(0),
-        serde_json::Value::Number(number) => number
-            .as_u64()
-            .ok_or_else(|| serde::de::Error::custom("invalid numeric u64 value")),
-        serde_json::Value::String(raw) => raw.parse::<u64>().map_err(serde::de::Error::custom),
-        other => Err(serde::de::Error::custom(format!(
-            "unexpected u64 value: {other}"
-        ))),
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::Number(number) => number.as_u64().unwrap_or_default(),
+        serde_json::Value::String(raw) => raw.parse::<u64>().unwrap_or_default(),
+        _ => 0,
+    })
+}
+
+fn deserialize_u128_string<'de, D>(deserializer: D) -> Result<u128, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::Number(number) => number.as_u64().map(u128::from).unwrap_or_default(),
+        serde_json::Value::String(raw) => raw.parse::<u128>().unwrap_or_default(),
+        _ => 0,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_endpoint, DytallixClient, LOCAL_NODE_ENDPOINT, PUBLIC_TESTNET_ENDPOINT};
+    use crate::error::SdkError;
+    use dytallix_core::address::DAddr;
+    use dytallix_core::keypair::DytallixKeypair;
+
+    #[test]
+    fn normalize_endpoint_trims_trailing_slash() {
+        assert_eq!(
+            normalize_endpoint("https://dytallix.com/").unwrap(),
+            PUBLIC_TESTNET_ENDPOINT
+        );
+        assert_eq!(
+            normalize_endpoint("http://localhost:3030///").unwrap(),
+            LOCAL_NODE_ENDPOINT
+        );
+    }
+
+    #[tokio::test]
+    async fn public_gateway_legacy_reads_fail_fast() {
+        let client = DytallixClient::testnet().await.unwrap();
+        let address = DAddr::from_public_key(DytallixKeypair::generate().public_key()).unwrap();
+
+        let validators = client.get_validators().await.unwrap_err();
+        let delegations = client.get_delegations(&address).await.unwrap_err();
+
+        match validators {
+            SdkError::NodeUnavailable { endpoint, reason } => {
+                assert!(endpoint.ends_with("/v1/validators"));
+                assert!(reason.contains("not exposed as public JSON routes"));
+            }
+            other => panic!("unexpected validator error: {other:?}"),
+        }
+
+        match delegations {
+            SdkError::NodeUnavailable { endpoint, reason } => {
+                assert!(endpoint.contains("/v1/delegations/"));
+                assert!(reason.contains("direct node endpoint"));
+            }
+            other => panic!("unexpected delegation error: {other:?}"),
+        }
     }
 }

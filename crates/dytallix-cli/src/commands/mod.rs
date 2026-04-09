@@ -30,12 +30,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const TESTNET_ENDPOINT: &str = "https://dytallix.com";
-const LOCAL_ENDPOINT: &str = "http://localhost:8545";
-const MAINNET_ENDPOINT: &str = "https://mainnet.dytallix.com";
+const LOCAL_ENDPOINT: &str = "http://localhost:3030";
 const TESTNET_FAUCET: &str = "https://dytallix.com/api/faucet";
 const LOCAL_FAUCET: &str = "http://localhost:3004";
 const DISCORD_LINK: &str = "https://discord.gg/eyVvu5kmPG";
-const EXPLORER_LINK: &str = "https://explorer.dytallix.com";
+const EXPLORER_LINK: &str = "https://dytallix.com/build/blockchain";
+const ENDPOINT_OVERRIDE_KEY: &str = "endpoint";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct CliConfig {
@@ -64,8 +64,8 @@ impl std::fmt::Display for NetworkProfile {
 
 pub(crate) async fn configured_client() -> Result<DytallixClient> {
     let config = load_config()?;
-    let endpoint = network_endpoint(config.network);
-    DytallixClient::new(endpoint)
+    let endpoint = configured_network_endpoint(&config)?;
+    DytallixClient::new(&endpoint)
         .await
         .map_err(humanize_sdk_error)
 }
@@ -95,12 +95,41 @@ pub(crate) fn faucet_endpoint(profile: NetworkProfile) -> Result<&'static str> {
     }
 }
 
-pub(crate) fn network_endpoint(profile: NetworkProfile) -> &'static str {
+pub(crate) fn network_endpoint(profile: NetworkProfile) -> Result<&'static str> {
     match profile {
-        NetworkProfile::Testnet => TESTNET_ENDPOINT,
-        NetworkProfile::Mainnet => MAINNET_ENDPOINT,
-        NetworkProfile::Local => LOCAL_ENDPOINT,
+        NetworkProfile::Testnet => Ok(TESTNET_ENDPOINT),
+        NetworkProfile::Local => Ok(LOCAL_ENDPOINT),
+        NetworkProfile::Mainnet => Err(anyhow!(
+            "Mainnet is not publicly available yet. Switch to testnet with `dytallix config network testnet`."
+        )),
     }
+}
+
+fn configured_network_endpoint(config: &CliConfig) -> Result<String> {
+    if let Ok(endpoint) = std::env::var("DYTALLIX_ENDPOINT") {
+        return normalize_endpoint_override(&endpoint);
+    }
+
+    if let Some(endpoint) = config.values.get(ENDPOINT_OVERRIDE_KEY) {
+        return normalize_endpoint_override(endpoint);
+    }
+
+    Ok(network_endpoint(config.network)?.to_owned())
+}
+
+fn normalize_endpoint_override(raw: &str) -> Result<String> {
+    let endpoint = raw.trim().trim_end_matches('/');
+    if endpoint.is_empty() {
+        return Err(anyhow!(
+            "Configured endpoint override is empty. Set a full http:// or https:// base URL."
+        ));
+    }
+    if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
+        return Err(anyhow!(
+            "Configured endpoint override `{endpoint}` must start with http:// or https://."
+        ));
+    }
+    Ok(endpoint.to_string())
 }
 
 pub(crate) fn ensure_cli_dir() -> Result<PathBuf> {
@@ -227,10 +256,44 @@ pub(crate) fn hex_to_bytes(raw: &str) -> Result<Vec<u8>> {
 
 pub(crate) async fn raw_get_json(path: &str) -> Result<Value> {
     let config = load_config()?;
-    let url = format!("{}{}", network_endpoint(config.network), path);
-    let response = reqwest::get(&url).await.map_err(|_| {
-        anyhow!("Cannot reach the Dytallix testnet at {url}. Check your network connection.")
-    })?;
+    let endpoint = configured_network_endpoint(&config)?;
+    raw_get_json_at(&endpoint, path).await
+}
+
+pub(crate) async fn raw_get_json_at(endpoint: &str, path: &str) -> Result<Value> {
+    let url = format!("{endpoint}{path}");
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|_| anyhow!("Cannot reach {url}. Check your network connection."))?;
+    if response.status().is_success() {
+        response
+            .json()
+            .await
+            .map_err(|err| anyhow!("Failed to decode response from {url}: {err}"))
+    } else {
+        let status = response.status();
+        let reason = response.text().await.unwrap_or_default();
+        Err(anyhow!(
+            "Request to {url} failed with status {status}. {reason}"
+        ))
+    }
+}
+
+pub(crate) async fn raw_post_json(path: &str, payload: &Value) -> Result<Value> {
+    let config = load_config()?;
+    let endpoint = configured_network_endpoint(&config)?;
+    raw_post_json_at(&endpoint, path, payload).await
+}
+
+pub(crate) async fn raw_post_json_at(endpoint: &str, path: &str, payload: &Value) -> Result<Value> {
+    let url = format!("{endpoint}{path}");
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .json(payload)
+        .send()
+        .await
+        .map_err(|_| anyhow!("Cannot reach {url}. Check your network connection."))?;
     if response.status().is_success() {
         response
             .json()
@@ -289,16 +352,16 @@ pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
 			required,
 			available,
 		} => anyhow!(
-			"Insufficient DRT for gas fees. Required: {} DRT. Available: {} DRT. Run dytallix faucet to get more.",
+			"Insufficient DRT balance. Required: {} DRT. Available: {} DRT.",
 			format_number(required),
 			format_number(available)
 		),
 		SdkError::InsufficientBalance {
-			token,
+			token: Token::DGT,
 			required,
 			available,
 		} => anyhow!(
-			"Insufficient balance for {token}. Required: {} {token}. Available: {} {token}.",
+			"Insufficient DGT for gas fees. Required: {} DGT. Available: {} DGT. Run dytallix faucet to get more.",
 			format_number(required),
 			format_number(available)
 		),
@@ -334,7 +397,9 @@ pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
 
 fn transaction_api_unavailable(endpoint: &str, reason: &str) -> bool {
     let lower_reason = reason.to_ascii_lowercase();
-    (endpoint.contains("/transactions") || endpoint.contains("/simulate"))
+    (endpoint.contains("/transactions")
+        || endpoint.contains("/simulate")
+        || endpoint.contains("/api/blockchain/submit"))
         && (lower_reason.contains("405 not allowed")
             || lower_reason.contains("404 not found")
             || lower_reason.contains("cannot post")
@@ -405,7 +470,11 @@ fn decode_hex_nibble(ch: char) -> Result<u8> {
 mod tests {
     use dytallix_sdk::error::SdkError;
 
-    use super::{faucet_balance_timeout, humanize_sdk_error, keystore_not_found_message};
+    use super::{
+        faucet_balance_timeout, faucet_endpoint, humanize_sdk_error, keystore_not_found_message,
+        network_endpoint, normalize_endpoint_override, NetworkProfile, LOCAL_ENDPOINT,
+        TESTNET_ENDPOINT, TESTNET_FAUCET,
+    };
     use dytallix_core::address::DAddr;
     use dytallix_core::keypair::DytallixKeypair;
 
@@ -425,7 +494,7 @@ mod tests {
         assert!(node_unavailable.contains("Check your network connection"));
 
         let tx_api_unavailable = humanize_sdk_error(SdkError::NodeUnavailable {
-            endpoint: "https://dytallix.com/v1/transactions/simulate".to_owned(),
+            endpoint: "https://dytallix.com/api/blockchain/submit".to_owned(),
             reason: "<html><h1>405 Not Allowed</h1></html>".to_owned(),
         })
         .to_string();
@@ -436,5 +505,30 @@ mod tests {
         let address = DAddr::from_public_key(DytallixKeypair::generate().public_key()).unwrap();
         let timeout = faucet_balance_timeout(&address).to_string();
         assert!(timeout.contains("discord.gg/eyVvu5kmPG"));
+    }
+
+    #[test]
+    fn network_profiles_use_public_surface_defaults() {
+        assert_eq!(
+            network_endpoint(NetworkProfile::Testnet).unwrap(),
+            TESTNET_ENDPOINT
+        );
+        assert_eq!(
+            network_endpoint(NetworkProfile::Local).unwrap(),
+            LOCAL_ENDPOINT
+        );
+        assert_eq!(
+            faucet_endpoint(NetworkProfile::Testnet).unwrap(),
+            TESTNET_FAUCET
+        );
+    }
+
+    #[test]
+    fn endpoint_override_is_normalized() {
+        assert_eq!(
+            normalize_endpoint_override("https://rpc.example.test/").unwrap(),
+            "https://rpc.example.test"
+        );
+        assert!(normalize_endpoint_override("rpc.example.test").is_err());
     }
 }

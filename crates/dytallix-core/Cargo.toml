@@ -7,10 +7,9 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-fips204 = "0.4"
 pqcrypto-sphincsplus = { workspace = true }
 pqcrypto-traits = { workspace = true }
-rand_core = "0.6"
+fips204 = { workspace = true }
 blake3 = { workspace = true }
 bech32 = { workspace = true }
 serde = { workspace = true }

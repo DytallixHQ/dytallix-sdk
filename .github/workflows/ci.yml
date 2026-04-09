@@ -18,11 +18,16 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Check public surface strings
+        run: |
+          ! rg -n 'explorer\.dytallix\.com|faucet\.dytallix\.com|testnet\.dytallix\.com|localhost:8545' . -g '!**/target/**'
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Build
         run: cargo build --all
+      - name: Verify first keypair path
+        run: bash scripts/public_smoke.sh first-keypair
       - name: Test
         run: cargo test --all

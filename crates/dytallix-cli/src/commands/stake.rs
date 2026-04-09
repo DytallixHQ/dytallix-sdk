@@ -8,7 +8,7 @@ use dytallix_sdk::Token;
 
 use crate::commands::{
     active_entry, active_keypair, configured_client, humanize_sdk_error, load_keystore,
-    validate_address,
+    raw_get_json, validate_address,
 };
 use crate::output;
 
@@ -118,22 +118,8 @@ async fn claim_rewards() -> Result<()> {
 async fn status() -> Result<()> {
     let keystore = load_keystore()?;
     let address = active_entry(&keystore)?.address.clone();
-    let client = configured_client().await?;
-    let delegations = client
-        .get_delegations(&address)
-        .await
-        .map_err(humanize_sdk_error)?;
-
-    output::section("Delegations");
-    if delegations.is_empty() {
-        output::warning("No delegations found for the active wallet.");
-    } else {
-        for delegation in delegations {
-            println!(
-                "Validator: {}\n  Delegated: {} DGT\n  Unclaimed: {} DRT",
-                delegation.validator, delegation.amount_dgt, delegation.unclaimed_drt
-            );
-        }
-    }
+    let value = raw_get_json(&format!("/api/staking/balance/{address}")).await?;
+    output::section("Staking status");
+    println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }

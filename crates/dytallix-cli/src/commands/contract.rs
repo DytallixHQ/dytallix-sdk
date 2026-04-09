@@ -1,18 +1,20 @@
 //! Contract command implementation.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
-
-use dytallix_sdk::transaction::TransactionBuilder;
-use dytallix_sdk::Token;
+use serde_json::{json, Value};
 
 use crate::commands::{
-    active_entry, active_keypair, bytes_to_hex, configured_client, display_path,
-    humanize_sdk_error, load_keystore, raw_get_json, read_bytes, validate_address,
+    active_entry, bytes_to_hex, display_path, hex_to_bytes, load_keystore, raw_get_json,
+    raw_post_json, read_bytes,
 };
 use crate::output;
+
+const DEPLOY_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(15);
+const DEPLOY_CONFIRMATION_POLL_INTERVAL: Duration = Duration::from_millis(750);
 
 /// Arguments for the `contract` command.
 #[derive(Debug, Clone, Args)]
@@ -67,99 +69,120 @@ pub async fn run(args: ContractArgs) -> Result<()> {
 async fn deploy(wasm_file: PathBuf) -> Result<()> {
     let wasm = validated_wasm_bytes(&wasm_file)?;
     let keystore = load_keystore()?;
-    let sender = active_entry(&keystore)?.address.clone();
-    let keypair = active_keypair(&keystore)?;
-    let client = configured_client().await?;
-    let account = client
-        .get_account(&sender)
-        .await
-        .map_err(humanize_sdk_error)?;
+    let sender = active_entry(&keystore)?.address.to_string();
+    let value = raw_post_json(
+        "/contracts/deploy",
+        &json!({
+            "deployer": sender,
+            "code": bytes_to_hex(&wasm),
+            "gas_limit": 1_000_000u64,
+        }),
+    )
+    .await?;
+    let tx_hash = value
+        .get("tx_hash")
+        .and_then(|raw| raw.as_str())
+        .map(str::to_owned);
+    let address = value
+        .get("address")
+        .and_then(|raw| raw.as_str())
+        .map(str::to_owned);
 
-    let mut data = b"contract:deploy:".to_vec();
-    data.extend_from_slice(&wasm);
-    let tx = TransactionBuilder::new()
-        .from(sender.clone())
-        .to(sender)
-        .amount(0, Token::DRT)
-        .nonce(account.nonce)
-        .data(data)
-        .build()
-        .map_err(|err| anyhow!(err.to_string()))?;
-    let (tx, fee) = tx
-        .with_estimated_fee(&client)
-        .await
-        .map_err(humanize_sdk_error)?;
-    output::fee_breakdown(&fee);
-    let signed = tx.sign(&keypair).map_err(humanize_sdk_error)?;
-    let tx_hash = signed.hash();
-    let receipt = client
-        .submit_transaction(&signed)
-        .await
-        .map_err(humanize_sdk_error)?;
+    if let Some(tx_hash) = tx_hash.as_deref() {
+        output::tx_hash(tx_hash);
+    }
+    if let Some(address) = address.as_deref() {
+        println!("Contract address: {address}");
+    }
 
-    output::tx_hash(&receipt.hash);
-    println!("Contract address: predicted-{}", &tx_hash[..16]);
-    output::success("Contract deployment submitted", None);
+    let mut services = RealDeployConfirmationServices;
+    match wait_for_deploy_confirmation(
+        &mut services,
+        tx_hash.as_deref(),
+        address.as_deref(),
+        DEPLOY_CONFIRMATION_TIMEOUT,
+        DEPLOY_CONFIRMATION_POLL_INTERVAL,
+    )
+    .await?
+    {
+        Some(confirmation) => {
+            output::success("Contract deployment confirmed", Some(confirmation.elapsed));
+            match confirmation.via {
+                DeployConfirmationVia::Transaction => {
+                    if let Some(tx_hash) = tx_hash.as_deref() {
+                        println!("Indexed via: /tx/{tx_hash}");
+                    }
+                    if address.is_some() {
+                        print_canonical_contract_verification(address.as_deref());
+                    }
+                }
+                DeployConfirmationVia::Contract => {
+                    if let Some(address) = address.as_deref() {
+                        println!("Indexed via: /api/contracts/{address}");
+                    }
+                    output::warning(
+                        "Contract metadata is available now. The transaction receipt route may still be indexing.",
+                    );
+                    print_canonical_contract_verification(address.as_deref());
+                }
+            }
+        }
+        None => {
+            output::warning(&format!(
+                "Contract deployment submitted but was not indexed within {:.1}s.",
+                DEPLOY_CONFIRMATION_TIMEOUT.as_secs_f64()
+            ));
+            print_canonical_contract_verification(address.as_deref());
+        }
+    }
     Ok(())
 }
 
 async fn call(address: String, method: String, args: Vec<String>) -> Result<()> {
-    let contract = validate_address(&address)?;
-    let keystore = load_keystore()?;
-    let sender = active_entry(&keystore)?.address.clone();
-    let keypair = active_keypair(&keystore)?;
-    let client = configured_client().await?;
-    let account = client
-        .get_account(&sender)
-        .await
-        .map_err(humanize_sdk_error)?;
-
-    let tx = TransactionBuilder::new()
-        .from(sender)
-        .to(contract)
-        .amount(0, Token::DRT)
-        .nonce(account.nonce)
-        .data(format!("contract:call:{method}:{}", args.join(",")).into_bytes())
-        .build()
-        .map_err(|err| anyhow!(err.to_string()))?;
-    let (tx, fee) = tx
-        .with_estimated_fee(&client)
-        .await
-        .map_err(humanize_sdk_error)?;
-    output::fee_breakdown(&fee);
-    let signed = tx.sign(&keypair).map_err(humanize_sdk_error)?;
-    let receipt = client
-        .submit_transaction(&signed)
-        .await
-        .map_err(humanize_sdk_error)?;
-    output::tx_hash(&receipt.hash);
-    output::success("Contract call submitted", None);
+    let contract = validate_contract_address(&address)?;
+    let value = raw_post_json(
+        "/contracts/call",
+        &json!({
+            "address": contract,
+            "method": method,
+            "args": encode_contract_args(&args),
+            "gas_limit": 1_000_000u64,
+        }),
+    )
+    .await?;
+    if let Some(tx_hash) = value.get("tx_hash").and_then(|raw| raw.as_str()) {
+        output::tx_hash(tx_hash);
+    }
+    output::section("Contract call");
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    output::success("Contract call executed", None);
     Ok(())
 }
 
 async fn query(address: String, method: String, args: Vec<String>) -> Result<()> {
-    let contract = validate_address(&address)?;
-    let value = raw_get_json(&format!(
-        "/v1/contracts/{contract}/query/{method}?args={}",
-        url_encode_args(&args)
-    ))
-    .await?;
+    let contract = validate_contract_address(&address)?;
+    let mut path = format!("/api/contracts/{contract}/query/{method}");
+    let encoded_args = encode_contract_args(&args);
+    if !encoded_args.is_empty() {
+        path.push_str(&format!("?args={encoded_args}"));
+    }
+    let value = raw_get_json(&path).await?;
     output::section("Contract query");
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }
 
 async fn info(address: String) -> Result<()> {
-    let contract = validate_address(&address)?;
-    let value = raw_get_json(&format!("/v1/contracts/{contract}")).await?;
+    let contract = validate_contract_address(&address)?;
+    let contract_info = raw_get_json(&format!("/api/contracts/{contract}")).await?;
     output::section("Contract info");
-    println!("{}", serde_json::to_string_pretty(&value)?);
+    println!("{}", serde_json::to_string_pretty(&contract_info)?);
     Ok(())
 }
 
 async fn events(address: String) -> Result<()> {
-    let contract = validate_address(&address)?;
-    let value = raw_get_json(&format!("/v1/contracts/{contract}/events")).await?;
+    let contract = validate_contract_address(&address)?;
+    let value = raw_get_json(&format!("/api/contracts/{contract}/events")).await?;
     output::section("Contract events");
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
@@ -183,6 +206,266 @@ fn validated_wasm_bytes(path: &Path) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn url_encode_args(args: &[String]) -> String {
-    bytes_to_hex(args.join(",").as_bytes())
+fn validate_contract_address(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    let hex = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+    if hex.len() != 40 {
+        return Err(anyhow!(
+            "Invalid contract address `{trimmed}`. Expected a 0x-prefixed 20-byte hex address."
+        ));
+    }
+    hex_to_bytes(hex)?;
+    Ok(format!("0x{hex}"))
+}
+
+fn encode_contract_args(args: &[String]) -> String {
+    if args.is_empty() {
+        String::new()
+    } else {
+        bytes_to_hex(args.join(",").as_bytes())
+    }
+}
+
+fn print_canonical_contract_verification(address: Option<&str>) {
+    if let Some(address) = address {
+        println!("Verify with: dytallix contract info {address}");
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeployConfirmationVia {
+    Transaction,
+    Contract,
+}
+
+#[derive(Debug)]
+struct DeployConfirmation {
+    via: DeployConfirmationVia,
+    elapsed: Duration,
+}
+
+trait DeployConfirmationServices {
+    async fn get_json(&mut self, path: &str) -> Result<Value>;
+    async fn wait(&mut self, duration: Duration);
+}
+
+struct RealDeployConfirmationServices;
+
+impl DeployConfirmationServices for RealDeployConfirmationServices {
+    async fn get_json(&mut self, path: &str) -> Result<Value> {
+        raw_get_json(path).await
+    }
+
+    async fn wait(&mut self, duration: Duration) {
+        tokio::time::sleep(duration).await;
+    }
+}
+
+async fn wait_for_deploy_confirmation<S>(
+    services: &mut S,
+    tx_hash: Option<&str>,
+    address: Option<&str>,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<Option<DeployConfirmation>>
+where
+    S: DeployConfirmationServices,
+{
+    if tx_hash.is_none() && address.is_none() {
+        return Ok(None);
+    }
+
+    let started = Instant::now();
+    loop {
+        if let Some(tx_hash) = tx_hash {
+            if services.get_json(&format!("/tx/{tx_hash}")).await.is_ok() {
+                return Ok(Some(DeployConfirmation {
+                    via: DeployConfirmationVia::Transaction,
+                    elapsed: started.elapsed(),
+                }));
+            }
+        }
+
+        if let Some(address) = address {
+            if services
+                .get_json(&format!("/api/contracts/{address}"))
+                .await
+                .is_ok()
+            {
+                return Ok(Some(DeployConfirmation {
+                    via: DeployConfirmationVia::Contract,
+                    elapsed: started.elapsed(),
+                }));
+            }
+        }
+
+        if started.elapsed() >= timeout {
+            return Ok(None);
+        }
+
+        services.wait(poll_interval).await;
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct DeployConvergence {
+    tx_visible: bool,
+    contract_visible: bool,
+    elapsed: Duration,
+}
+
+#[cfg(test)]
+async fn wait_for_deploy_convergence<S>(
+    services: &mut S,
+    tx_hash: &str,
+    address: &str,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<DeployConvergence>
+where
+    S: DeployConfirmationServices,
+{
+    let started = Instant::now();
+    let mut convergence = DeployConvergence::default();
+
+    loop {
+        if !convergence.tx_visible
+            && services.get_json(&format!("/tx/{tx_hash}")).await.is_ok()
+        {
+            convergence.tx_visible = true;
+        }
+        if !convergence.contract_visible
+            && services
+                .get_json(&format!("/api/contracts/{address}"))
+                .await
+                .is_ok()
+        {
+            convergence.contract_visible = true;
+        }
+        convergence.elapsed = started.elapsed();
+
+        if convergence.tx_visible && convergence.contract_visible {
+            return Ok(convergence);
+        }
+        if convergence.elapsed >= timeout {
+            return Ok(convergence);
+        }
+
+        services.wait(poll_interval).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    use serde_json::{json, Value};
+
+    use super::{
+        encode_contract_args, validate_contract_address, wait_for_deploy_confirmation,
+        wait_for_deploy_convergence, DeployConfirmationServices, DeployConfirmationVia,
+    };
+
+    #[derive(Default)]
+    struct MockDeployConfirmationServices {
+        responses: HashMap<String, Vec<Result<Value, String>>>,
+        waits: Vec<Duration>,
+    }
+
+    impl MockDeployConfirmationServices {
+        fn push_ok(&mut self, path: &str, value: Value) {
+            self.responses
+                .entry(path.to_owned())
+                .or_default()
+                .push(Ok(value));
+        }
+
+        fn push_err(&mut self, path: &str, message: &str) {
+            self.responses
+                .entry(path.to_owned())
+                .or_default()
+                .push(Err(message.to_owned()));
+        }
+    }
+
+    impl DeployConfirmationServices for MockDeployConfirmationServices {
+        async fn get_json(&mut self, path: &str) -> anyhow::Result<Value> {
+            let queue = self
+                .responses
+                .get_mut(path)
+                .unwrap_or_else(|| panic!("unexpected path {path}"));
+            let response = queue.remove(0);
+            match response {
+                Ok(value) => Ok(value),
+                Err(message) => Err(anyhow::anyhow!(message)),
+            }
+        }
+
+        async fn wait(&mut self, duration: Duration) {
+            self.waits.push(duration);
+        }
+    }
+
+    #[test]
+    fn contract_address_validation_accepts_prefixed_hex() {
+        let address = validate_contract_address("0x9a9671441249ee2c364f9b4bc8049e61b082449a").unwrap();
+        assert_eq!(address, "0x9a9671441249ee2c364f9b4bc8049e61b082449a");
+    }
+
+    #[test]
+    fn contract_args_are_hex_encoded() {
+        assert_eq!(encode_contract_args(&["hello".to_owned(), "7".to_owned()]), "68656c6c6f2c37");
+    }
+
+    #[tokio::test]
+    async fn deploy_confirmation_uses_contract_metadata_when_receipt_route_lags() {
+        let mut services = MockDeployConfirmationServices::default();
+        services.push_err("/tx/0xabc", "not ready");
+        services.push_ok(
+            "/api/contracts/0xdef",
+            json!({ "address": "0xdef", "tx_hash": "0xabc" }),
+        );
+
+        let confirmation = wait_for_deploy_confirmation(
+            &mut services,
+            Some("0xabc"),
+            Some("0xdef"),
+            Duration::from_secs(5),
+            Duration::from_millis(250),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(confirmation.via, DeployConfirmationVia::Contract);
+        assert!(services.waits.is_empty());
+    }
+
+    #[tokio::test]
+    async fn deploy_visibility_surfaces_converge_within_expected_window() {
+        let mut services = MockDeployConfirmationServices::default();
+        services.push_err("/tx/0xabc", "pending");
+        services.push_err("/tx/0xabc", "pending");
+        services.push_ok("/tx/0xabc", json!({ "tx_hash": "0xabc", "status": "Success" }));
+
+        services.push_err("/api/contracts/0xdef", "missing");
+        services.push_ok("/api/contracts/0xdef", json!({ "address": "0xdef" }));
+
+        let convergence = wait_for_deploy_convergence(
+            &mut services,
+            "0xabc",
+            "0xdef",
+            Duration::from_secs(3),
+            Duration::from_millis(250),
+        )
+        .await
+        .unwrap();
+
+        assert!(convergence.tx_visible);
+        assert!(convergence.contract_visible);
+        assert!(convergence.elapsed <= Duration::from_secs(3));
+        assert_eq!(services.waits.len(), 2);
+    }
 }

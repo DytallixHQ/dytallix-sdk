@@ -90,7 +90,11 @@ async fn show_epoch() -> Result<()> {
 }
 
 async fn show_params() -> Result<()> {
-    let params = raw_get_json("/v1/chain/params").await?;
+    let status = raw_get_json("/status").await?;
+    let params = serde_json::json!({
+        "chain_id": status.get("chain_id").cloned().unwrap_or(serde_json::Value::Null),
+        "gas": status.get("gas").cloned().unwrap_or(serde_json::Value::Null),
+    });
     output::section("Chain params");
     println!("{}", serde_json::to_string_pretty(&params)?);
     Ok(())

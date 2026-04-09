@@ -25,7 +25,7 @@ pub use error::SdkError;
 pub enum Token {
     /// Dytallix Governance Token used for governance and delegation.
     DGT,
-    /// Dytallix Reward Token used for gas fees, rewards, and burns.
+    /// Dytallix Reward Token used for rewards and burns.
     DRT,
 }
 
@@ -43,7 +43,7 @@ impl fmt::Display for Token {
 pub struct Balance {
     /// The DGT balance used for governance and delegation.
     pub dgt: u128,
-    /// The DRT balance used for gas fees and rewards.
+    /// The DRT balance used for rewards and burns.
     pub drt: u128,
 }
 
@@ -74,13 +74,13 @@ pub struct AccountState {
 pub struct FeeEstimate {
     /// Compute gas units.
     pub c_gas: u64,
-    /// The fee cost of the compute gas component in micro-units.
+    /// Historical field name retained for SDK compatibility.
     pub c_gas_cost_drt: u128,
     /// Bandwidth gas units.
     pub b_gas: u64,
-    /// The fee cost of the bandwidth gas component in micro-units.
+    /// Historical field name retained for SDK compatibility.
     pub b_gas_cost_drt: u128,
-    /// The total fee in micro-units.
+    /// Historical field name retained for SDK compatibility.
     pub total_cost_drt: u128,
 }
 
@@ -127,7 +127,7 @@ pub struct TransactionReceipt {
     pub block: u64,
     /// The transaction execution status.
     pub status: TransactionStatus,
-    /// The DRT fee charged for the transaction.
+    /// The fee charged for the transaction.
     pub fee: FeeEstimate,
 }
 

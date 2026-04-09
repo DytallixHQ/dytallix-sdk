@@ -21,7 +21,7 @@ use commands::wallet::WalletArgs;
     name = "dytallix",
     about = "Dytallix testnet CLI — PQC-native Layer 1 blockchain",
     version,
-    long_about = "Official CLI for the Dytallix testnet.\n\nDocumentation: https://dytallix.com/docs\nDiscord: https://discord.gg/eyVvu5kmPG\nExplorer: https://explorer.dytallix.com\nGitHub: https://github.com/DytallixHQ"
+    long_about = "Official CLI for the Dytallix testnet.\n\nDocumentation: https://dytallix.com/docs\nDiscord: https://discord.gg/eyVvu5kmPG\nExplorer: https://dytallix.com/build/blockchain\nGitHub: https://github.com/DytallixHQ"
 )]
 struct Cli {
     #[command(subcommand)]

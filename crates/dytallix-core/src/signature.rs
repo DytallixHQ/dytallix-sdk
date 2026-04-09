@@ -47,22 +47,10 @@ pub fn verify_mldsa65(
         });
     }
 
-    let public_key = ml_dsa_65::PublicKey::try_from_bytes(pubkey.try_into().map_err(|_| {
-        DytallixError::InvalidKeySize {
-            expected: MLDSA65_PUBLIC_KEY_BYTES,
-            got: pubkey.len(),
-        }
-    })?)
-    .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))?;
+    let public_key = ml_dsa_65_public_key_from_bytes(pubkey)?;
+    let detached = ml_dsa_65_signature_from_bytes(signature)?;
 
-    let signature = <[u8; MLDSA65_SIGNATURE_BYTES]>::try_from(signature).map_err(|_| {
-        DytallixError::InvalidSignatureSize {
-            expected: MLDSA65_SIGNATURE_BYTES,
-            got: signature.len(),
-        }
-    })?;
-
-    Ok(public_key.verify(message, &signature, &[]))
+    Ok(public_key.verify(message, &detached, &[]))
 }
 
 /// Verifies an SLH-DSA-SHAKE-192s detached signature.
@@ -144,4 +132,26 @@ pub fn batch_verify_mldsa65(
     }
 
     Ok(results)
+}
+
+fn ml_dsa_65_public_key_from_bytes(
+    pubkey: &[u8],
+) -> Result<ml_dsa_65::PublicKey, DytallixError> {
+    let public_key = pubkey.try_into().map_err(|_| DytallixError::InvalidKeySize {
+        expected: MLDSA65_PUBLIC_KEY_BYTES,
+        got: pubkey.len(),
+    })?;
+    ml_dsa_65::PublicKey::try_from_bytes(public_key)
+        .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))
+}
+
+fn ml_dsa_65_signature_from_bytes(
+    signature: &[u8],
+) -> Result<[u8; ml_dsa_65::SIG_LEN], DytallixError> {
+    signature
+        .try_into()
+        .map_err(|_| DytallixError::InvalidSignatureSize {
+            expected: MLDSA65_SIGNATURE_BYTES,
+            got: signature.len(),
+        })
 }

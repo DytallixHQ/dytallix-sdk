@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 
 [[example]]
 name = "first-keypair"
@@ -17,17 +20,17 @@ required-features = ["network"]
 
 [features]
 default = []
-network = ["dep:reqwest"]
+network = ["dep:reqwest", "dep:tokio"]
 
 [dependencies]
-base64 = "0.22"
 dytallix-core = { path = "../dytallix-core" }
 reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha3 = "0.10"
+base64 = { workspace = true }
+sha3 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
-tokio = { workspace = true }

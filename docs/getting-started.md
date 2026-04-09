@@ -1,12 +1,36 @@
 # Getting Started
 
-## First keypair
+[Docs hub](README.md) | [Project README](../README.md) | [Examples](../examples/README.md)
 
-Add the SDK:
+## Install Paths
+
+The SDK is currently consumed from Git, not crates.io.
+
+Add the library crate:
 
 ```bash
-cargo add dytallix-sdk
+cargo add dytallix-sdk --git https://github.com/DytallixHQ/dytallix-sdk.git
 ```
+
+Add the library crate with the network client and faucet support:
+
+```bash
+cargo add dytallix-sdk --git https://github.com/DytallixHQ/dytallix-sdk.git --features network
+```
+
+Install the CLI:
+
+```bash
+cargo install --git https://github.com/DytallixHQ/dytallix-sdk.git dytallix-cli --bin dytallix
+```
+
+Build from a local clone:
+
+```bash
+cargo build --all
+```
+
+## First Keypair
 
 Generate an ML-DSA-65 keypair and print a D-Addr:
 
@@ -26,13 +50,10 @@ If you cloned this repository, you can run the same flow directly:
 cargo run -p dytallix-sdk --example first-keypair
 ```
 
-## Network features
-
-The default crate is optimized for the shortest first-keypair path. If you need
-the testnet client or faucet client, enable the `network` feature:
+## Network Features
 
 ```bash
-cargo add dytallix-sdk --features network
+cargo add dytallix-sdk --git https://github.com/DytallixHQ/dytallix-sdk.git --features network
 ```
 
 If you cloned this repository, the network example runs with:
@@ -41,19 +62,72 @@ If you cloned this repository, the network example runs with:
 cargo run -p dytallix-sdk --features network --example first-transaction
 ```
 
-## CLI
+Minimal networked flow in Rust:
 
-Install the CLI:
+```rust
+use dytallix_sdk::client::DytallixClient;
+use dytallix_sdk::faucet::FaucetClient;
 
-```bash
-cargo install --git https://github.com/DytallixHQ/dytallix-sdk.git dytallix-cli --bin dytallix
+let client = DytallixClient::testnet().await?;
+let faucet = FaucetClient::testnet();
 ```
 
-Create a wallet and request faucet funds:
+The public testnet surface is still evolving, but the SDK now targets the live
+read, faucet, and transaction submission routes exposed from
+`https://dytallix.com`.
+
+## CLI Quickstart
+
+The CLI stores its state under `~/.dytallix/`.
+
+Create a wallet, persist it to the keystore, and request faucet funds:
 
 ```bash
 dytallix init
 ```
 
-Website: https://dytallix.com
-Discord: https://discord.gg/eyVvu5kmPG
+Inspect the active wallet:
+
+```bash
+dytallix wallet info
+dytallix balance
+```
+
+Check faucet eligibility:
+
+```bash
+dytallix faucet status
+```
+
+Send a test transfer:
+
+```bash
+dytallix send <daddr> 100
+```
+
+Prepare a first contract deployment:
+
+```bash
+dytallix contract deploy ./my_contract.wasm
+```
+
+After deploy, verify the indexed contract metadata with:
+
+```bash
+dytallix contract info <contract-address>
+```
+
+On the public testnet gateway, `dytallix contract info <contract-address>` is the
+canonical verification path if `/tx/<hash>` indexing lags behind contract metadata.
+
+## Local Files
+
+- Keystore: `~/.dytallix/keystore.json`
+- CLI config: `~/.dytallix/config.json`
+
+## Next Steps
+
+- Read [Core concepts](core-concepts.md) for tokens, addresses, gas, and network profiles.
+- Read [SDK reference](sdk-reference.md) for the Rust API layout.
+- Read [CLI reference](cli-reference.md) for command-by-command examples.
+- Read [FAQ](faq.md) for current operational caveats.

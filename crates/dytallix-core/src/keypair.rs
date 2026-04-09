@@ -1,3 +1,4 @@
+use blake3::Hasher as Blake3Hasher;
 use fips204::ml_dsa_65;
 use fips204::traits::{KeyGen, SerDes, Signer};
 use pqcrypto_sphincsplus::sphincsshake192ssimple;
@@ -5,7 +6,6 @@ use pqcrypto_traits::sign::{
     DetachedSignature as DetachedSignatureTrait, PublicKey as PublicKeyTrait,
     SecretKey as SecretKeyTrait,
 };
-use rand_core::OsRng;
 
 use crate::error::DytallixError;
 
@@ -71,8 +71,8 @@ impl DytallixKeypair {
     /// assert_eq!(keypair.private_key().len(), 4032);
     /// ```
     pub fn generate() -> Self {
-        let (public_key, private_key) =
-            ml_dsa_65::KG::try_keygen_with_rng(&mut OsRng).expect("ML-DSA-65 keygen failed");
+        let (public_key, private_key) = ml_dsa_65::KG::try_keygen()
+            .expect("ML-DSA-65 key generation should succeed with the OS RNG");
 
         Self {
             public_key: public_key.into_bytes().to_vec(),
@@ -108,7 +108,8 @@ impl DytallixKeypair {
 
     /// Reconstructs a keypair from raw private key bytes.
     ///
-    /// Byte lengths are matched against the canonical Dytallix schemes.
+    /// Byte lengths are matched against the canonical Dytallix schemes. For
+    /// ML-DSA-65, the public key is reconstructed from the packed secret key.
     ///
     /// # Examples
     ///
@@ -122,18 +123,11 @@ impl DytallixKeypair {
     pub fn from_private_key(bytes: &[u8]) -> Result<Self, DytallixError> {
         match bytes.len() {
             MLDSA65_PRIVATE_KEY_BYTES => {
-                let private_key =
-                    ml_dsa_65::PrivateKey::try_from_bytes(bytes.try_into().map_err(|_| {
-                        DytallixError::InvalidKeySize {
-                            expected: MLDSA65_PRIVATE_KEY_BYTES,
-                            got: bytes.len(),
-                        }
-                    })?)
-                    .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))?;
-                let public_key = private_key.get_public_key().into_bytes().to_vec();
+                let private_key = ml_dsa_65_private_key_from_bytes(bytes)?;
+                let public_key = private_key.get_public_key();
 
                 Ok(Self {
-                    public_key,
+                    public_key: public_key.into_bytes().to_vec(),
                     private_key: private_key.into_bytes().to_vec(),
                     scheme: KeyScheme::MlDsa65,
                 })
@@ -162,8 +156,8 @@ impl DytallixKeypair {
 
     /// Signs a message with the active scheme.
     ///
-    /// ML-DSA-65 signatures are always 3,309 bytes. SLH-DSA signatures are
-    /// always 16,224 bytes.
+    /// ML-DSA-65 signatures are deterministic and always 3,309 bytes. SLH-DSA
+    /// signatures are always 16,224 bytes.
     ///
     /// # Examples
     ///
@@ -177,19 +171,12 @@ impl DytallixKeypair {
     pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>, DytallixError> {
         match self.scheme {
             KeyScheme::MlDsa65 => {
-                let private_key = ml_dsa_65::PrivateKey::try_from_bytes(
-                    self.private_key.as_slice().try_into().map_err(|_| {
-                        DytallixError::InvalidKeySize {
-                            expected: MLDSA65_PRIVATE_KEY_BYTES,
-                            got: self.private_key.len(),
-                        }
-                    })?,
-                )
-                .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))?;
-                let bytes = private_key
-                    .try_sign(message, &[])
-                    .map_err(|err| DytallixError::InvalidSignature(err.to_string()))?
-                    .to_vec();
+                let private_key = ml_dsa_65_private_key_from_bytes(&self.private_key)?;
+                let seed = deterministic_mldsa65_seed(&self.private_key, message);
+                let signature = private_key
+                    .try_sign_with_seed(&seed, message, &[])
+                    .map_err(|err| DytallixError::CryptoError(err.to_string()))?;
+                let bytes = signature.to_vec();
 
                 if bytes.len() != MLDSA65_SIGNATURE_BYTES {
                     return Err(DytallixError::InvalidSignatureSize {
@@ -207,11 +194,7 @@ impl DytallixKeypair {
                     )
                     .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))?;
                 let signature = sphincsshake192ssimple::detached_sign(message, &private_key);
-                let bytes =
-                    <sphincsshake192ssimple::DetachedSignature as DetachedSignatureTrait>::as_bytes(
-                        &signature,
-                    )
-                    .to_vec();
+                let bytes = signature.as_bytes().to_vec();
 
                 if bytes.len() != SLHDSA_SIGNATURE_BYTES {
                     return Err(DytallixError::InvalidSignatureSize {
@@ -266,4 +249,25 @@ impl DytallixKeypair {
     pub fn scheme(&self) -> KeyScheme {
         self.scheme
     }
+}
+
+fn ml_dsa_65_private_key_from_bytes(
+    bytes: &[u8],
+) -> Result<ml_dsa_65::PrivateKey, DytallixError> {
+    let private_key = bytes
+        .try_into()
+        .map_err(|_| DytallixError::InvalidKeySize {
+            expected: MLDSA65_PRIVATE_KEY_BYTES,
+            got: bytes.len(),
+        })?;
+    ml_dsa_65::PrivateKey::try_from_bytes(private_key)
+        .map_err(|err| DytallixError::InvalidKeypair(err.to_string()))
+}
+
+fn deterministic_mldsa65_seed(private_key: &[u8], message: &[u8]) -> [u8; 32] {
+    let mut hasher = Blake3Hasher::new();
+    hasher.update(b"dytallix-ml-dsa-65-seed");
+    hasher.update(private_key);
+    hasher.update(message);
+    *hasher.finalize().as_bytes()
 }
