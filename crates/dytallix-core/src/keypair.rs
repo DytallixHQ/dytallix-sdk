@@ -251,9 +251,7 @@ impl DytallixKeypair {
     }
 }
 
-fn ml_dsa_65_private_key_from_bytes(
-    bytes: &[u8],
-) -> Result<ml_dsa_65::PrivateKey, DytallixError> {
+fn ml_dsa_65_private_key_from_bytes(bytes: &[u8]) -> Result<ml_dsa_65::PrivateKey, DytallixError> {
     let private_key = bytes
         .try_into()
         .map_err(|_| DytallixError::InvalidKeySize {
