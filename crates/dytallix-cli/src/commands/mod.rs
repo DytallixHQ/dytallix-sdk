@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const TESTNET_ENDPOINT: &str = "https://dytallix.com";
+const TESTNET_CONTRACT_ENDPOINT: &str = "https://dytallix.com/rpc";
 const LOCAL_ENDPOINT: &str = "http://localhost:3030";
 const TESTNET_FAUCET: &str = "https://dytallix.com/api/faucet";
 const LOCAL_FAUCET: &str = "http://localhost:3004";
@@ -115,6 +116,20 @@ fn configured_network_endpoint(config: &CliConfig) -> Result<String> {
     }
 
     Ok(network_endpoint(config.network)?.to_owned())
+}
+
+pub(crate) fn configured_contract_endpoint() -> Result<String> {
+    let config = load_config()?;
+    let endpoint = configured_network_endpoint(&config)?;
+    Ok(contract_endpoint_for_base(&endpoint))
+}
+
+fn contract_endpoint_for_base(endpoint: &str) -> String {
+    if endpoint == TESTNET_ENDPOINT {
+        TESTNET_CONTRACT_ENDPOINT.to_owned()
+    } else {
+        endpoint.to_owned()
+    }
 }
 
 fn normalize_endpoint_override(raw: &str) -> Result<String> {
@@ -277,12 +292,6 @@ pub(crate) async fn raw_get_json_at(endpoint: &str, path: &str) -> Result<Value>
             "Request to {url} failed with status {status}. {reason}"
         ))
     }
-}
-
-pub(crate) async fn raw_post_json(path: &str, payload: &Value) -> Result<Value> {
-    let config = load_config()?;
-    let endpoint = configured_network_endpoint(&config)?;
-    raw_post_json_at(&endpoint, path, payload).await
 }
 
 pub(crate) async fn raw_post_json_at(endpoint: &str, path: &str, payload: &Value) -> Result<Value> {
@@ -471,9 +480,10 @@ mod tests {
     use dytallix_sdk::error::SdkError;
 
     use super::{
-        faucet_balance_timeout, faucet_endpoint, humanize_sdk_error, keystore_not_found_message,
-        network_endpoint, normalize_endpoint_override, NetworkProfile, LOCAL_ENDPOINT,
-        TESTNET_ENDPOINT, TESTNET_FAUCET,
+        contract_endpoint_for_base, faucet_balance_timeout, faucet_endpoint,
+        humanize_sdk_error, keystore_not_found_message, network_endpoint,
+        normalize_endpoint_override, NetworkProfile, LOCAL_ENDPOINT,
+        TESTNET_CONTRACT_ENDPOINT, TESTNET_ENDPOINT, TESTNET_FAUCET,
     };
     use dytallix_core::address::DAddr;
     use dytallix_core::keypair::DytallixKeypair;
@@ -530,5 +540,21 @@ mod tests {
             "https://rpc.example.test"
         );
         assert!(normalize_endpoint_override("rpc.example.test").is_err());
+    }
+
+    #[test]
+    fn public_contract_commands_use_rpc_gateway() {
+        assert_eq!(
+            contract_endpoint_for_base(TESTNET_ENDPOINT),
+            TESTNET_CONTRACT_ENDPOINT
+        );
+        assert_eq!(
+            contract_endpoint_for_base(LOCAL_ENDPOINT),
+            LOCAL_ENDPOINT
+        );
+        assert_eq!(
+            contract_endpoint_for_base("https://rpc.example.test"),
+            "https://rpc.example.test"
+        );
     }
 }

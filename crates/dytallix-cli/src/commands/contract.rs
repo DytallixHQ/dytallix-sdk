@@ -8,8 +8,8 @@ use clap::{Args, Subcommand};
 use serde_json::{json, Value};
 
 use crate::commands::{
-    active_entry, bytes_to_hex, display_path, hex_to_bytes, load_keystore, raw_get_json,
-    raw_post_json, read_bytes,
+    active_entry, bytes_to_hex, configured_contract_endpoint, display_path, hex_to_bytes,
+    load_keystore, raw_get_json_at, raw_post_json_at, read_bytes,
 };
 use crate::output;
 
@@ -70,7 +70,9 @@ async fn deploy(wasm_file: PathBuf) -> Result<()> {
     let wasm = validated_wasm_bytes(&wasm_file)?;
     let keystore = load_keystore()?;
     let sender = active_entry(&keystore)?.address.to_string();
-    let value = raw_post_json(
+    let endpoint = configured_contract_endpoint()?;
+    let value = raw_post_json_at(
+        &endpoint,
         "/contracts/deploy",
         &json!({
             "deployer": sender,
@@ -140,7 +142,9 @@ async fn deploy(wasm_file: PathBuf) -> Result<()> {
 
 async fn call(address: String, method: String, args: Vec<String>) -> Result<()> {
     let contract = validate_contract_address(&address)?;
-    let value = raw_post_json(
+    let endpoint = configured_contract_endpoint()?;
+    let value = raw_post_json_at(
+        &endpoint,
         "/contracts/call",
         &json!({
             "address": contract,
@@ -161,12 +165,13 @@ async fn call(address: String, method: String, args: Vec<String>) -> Result<()> 
 
 async fn query(address: String, method: String, args: Vec<String>) -> Result<()> {
     let contract = validate_contract_address(&address)?;
+    let endpoint = configured_contract_endpoint()?;
     let mut path = format!("/api/contracts/{contract}/query/{method}");
     let encoded_args = encode_contract_args(&args);
     if !encoded_args.is_empty() {
         path.push_str(&format!("?args={encoded_args}"));
     }
-    let value = raw_get_json(&path).await?;
+    let value = raw_get_json_at(&endpoint, &path).await?;
     output::section("Contract query");
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
@@ -174,7 +179,8 @@ async fn query(address: String, method: String, args: Vec<String>) -> Result<()>
 
 async fn info(address: String) -> Result<()> {
     let contract = validate_contract_address(&address)?;
-    let contract_info = raw_get_json(&format!("/api/contracts/{contract}")).await?;
+    let endpoint = configured_contract_endpoint()?;
+    let contract_info = raw_get_json_at(&endpoint, &format!("/api/contracts/{contract}")).await?;
     output::section("Contract info");
     println!("{}", serde_json::to_string_pretty(&contract_info)?);
     Ok(())
@@ -182,7 +188,8 @@ async fn info(address: String) -> Result<()> {
 
 async fn events(address: String) -> Result<()> {
     let contract = validate_contract_address(&address)?;
-    let value = raw_get_json(&format!("/api/contracts/{contract}/events")).await?;
+    let endpoint = configured_contract_endpoint()?;
+    let value = raw_get_json_at(&endpoint, &format!("/api/contracts/{contract}/events")).await?;
     output::section("Contract events");
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
@@ -253,7 +260,8 @@ struct RealDeployConfirmationServices;
 
 impl DeployConfirmationServices for RealDeployConfirmationServices {
     async fn get_json(&mut self, path: &str) -> Result<Value> {
-        raw_get_json(path).await
+        let endpoint = configured_contract_endpoint()?;
+        raw_get_json_at(&endpoint, path).await
     }
 
     async fn wait(&mut self, duration: Duration) {

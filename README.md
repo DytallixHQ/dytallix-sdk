@@ -110,6 +110,11 @@ dytallix send <daddr> 100
 dytallix contract deploy ./my_contract.wasm
 ```
 
+On the public testnet profile, the CLI routes contract deploy, info, query,
+and events commands through `https://dytallix.com/rpc` automatically while the
+wallet, balance, and faucet flows continue to use the website and faucet
+surfaces.
+
 See [Getting started](docs/getting-started.md) and the
 [CLI reference](docs/cli-reference.md) for the full flow.
 

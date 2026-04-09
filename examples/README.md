@@ -10,7 +10,7 @@ from the repository root.
 - [`first-transaction.rs`](first-transaction.rs) - request faucet funds and
   attempt a signed transfer against the configured public testnet endpoints
 - [`deploy-contract.rs`](deploy-contract.rs) - use the CLI keystore and prepare
-  a first contract deployment flow
+  a first contract deployment flow through the public `/rpc` gateway
 - [`contracts/minimal_contract`](contracts/minimal_contract) - build a minimal
   deployable WASM artifact for the public contract quickstart
 

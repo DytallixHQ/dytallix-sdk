@@ -68,6 +68,10 @@ The active profile controls which node and faucet endpoints the CLI uses. The
 `mainnet` profile remains reserved in config files, but the public CLI does not
 offer a selectable mainnet endpoint.
 
+On the public `testnet` profile, contract deploy, call, info, query, and events
+commands use `https://dytallix.com/rpc` automatically because those routes are
+served by the node gateway rather than the website root.
+
 ## Where should I ask for help or report issues?
 
 - General issues or feature requests: open a GitHub issue in the repository

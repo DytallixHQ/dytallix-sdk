@@ -97,8 +97,8 @@ where
     println!("  dytallix send {} 100", short_address(&address));
     println!();
     println!("  Sends 100 DRT to any address.");
-    println!("  Gas paid in DRT automatically.");
-    println!("  Fee breakdown shown before confirmation.");
+    println!("  Uses your active wallet and the testnet endpoint.");
+    println!("  Review the quoted fee before you confirm.");
     println!("  Run it now to hit Milestone 2.");
     println!();
     output::divider();
@@ -107,8 +107,8 @@ where
     println!();
     println!("  dytallix contract deploy ./my_contract.wasm");
     println!();
-    println!("  Gas paid in DRT automatically.");
-    println!("  Fee breakdown shown before confirmation.");
+    println!("  Build a release WASM artifact first.");
+    println!("  On public testnet, contract routes use https://dytallix.com/rpc automatically.");
     println!("  See docs/getting-started.md for a");
     println!("  complete walkthrough to Milestone 3.");
 

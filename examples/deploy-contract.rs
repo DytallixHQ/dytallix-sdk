@@ -13,7 +13,8 @@ async fn main() -> anyhow::Result<()> {
         )
     })?;
     println!("Deploying from: {}", entry.address);
-    println!("Run: dytallix contract deploy ./my_contract.wasm");
+    println!("Run: dytallix contract deploy ./examples/contracts/minimal_contract/target/wasm32-unknown-unknown/release/minimal_contract.wasm");
+    println!("Public testnet contract commands use https://dytallix.com/rpc automatically.");
     println!("See: https://dytallix.com/docs/getting-started");
     Ok(())
 }

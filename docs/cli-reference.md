@@ -149,13 +149,14 @@ dytallix contract query <contract> get_count
 
 Current public behavior:
 
-- `deploy` posts WASM bytes to `https://dytallix.com/contracts/deploy`
-- `deploy` polls `/tx/<hash>` and `/api/contracts/<address>` after submission and prints a confirmed state as soon as one of those public routes is indexed
-- `deploy` prints `dytallix contract info <address>` as the canonical contract verification path on the public gateway when `/tx/<hash>` lags
-- `call` posts method execution requests to `https://dytallix.com/contracts/call`
-- `info <address>` reads `https://dytallix.com/api/contracts/<address>`
-- `query` reads `https://dytallix.com/api/contracts/<address>/query/<method>`
-- `events` reads `https://dytallix.com/api/contracts/<address>/events`
+- On the public `testnet` profile, contract commands use `https://dytallix.com/rpc`
+- `deploy` posts WASM bytes to `https://dytallix.com/rpc/contracts/deploy`
+- `deploy` polls `/tx/<hash>` and `/api/contracts/<address>` on the contract gateway and prints a confirmed state as soon as one of those routes is indexed
+- `deploy` prints `dytallix contract info <address>` as the canonical verification path when `/tx/<hash>` lags
+- `call` posts method execution requests to `https://dytallix.com/rpc/contracts/call`
+- `info <address>` reads `https://dytallix.com/rpc/api/contracts/<address>`
+- `query` reads `https://dytallix.com/rpc/api/contracts/<address>/query/<method>`
+- `events` reads `https://dytallix.com/rpc/api/contracts/<address>/events`
 - for a direct node endpoint or a local node, set `DYTALLIX_ENDPOINT` or run
   `dytallix config set endpoint http://localhost:3030`
 
@@ -260,10 +261,14 @@ The CLI resolves endpoints from the active network profile:
 - `testnet` -> `https://dytallix.com`
 - `local` -> `http://localhost:3030`
 
+Contract commands are the exception on public testnet: they route through
+`https://dytallix.com/rpc` automatically because the website root does not
+accept contract POSTs.
+
 The public CLI currently exposes only `testnet` and `local` through
 `dytallix config network`.
 
-For direct-node testing, contract lifecycle reads, or a custom RPC base, you
+For direct-node testing or a custom RPC base, you
 can override the active profile endpoint:
 
 ```bash

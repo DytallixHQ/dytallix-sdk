@@ -105,10 +105,12 @@ Send a test transfer:
 dytallix send <daddr> 100
 ```
 
-Prepare a first contract deployment:
+Build and deploy the minimal example contract:
 
 ```bash
-dytallix contract deploy ./my_contract.wasm
+rustup target add wasm32-unknown-unknown
+cargo build --manifest-path examples/contracts/minimal_contract/Cargo.toml --target wasm32-unknown-unknown --release
+dytallix contract deploy ./examples/contracts/minimal_contract/target/wasm32-unknown-unknown/release/minimal_contract.wasm
 ```
 
 After deploy, verify the indexed contract metadata with:
@@ -117,8 +119,13 @@ After deploy, verify the indexed contract metadata with:
 dytallix contract info <contract-address>
 ```
 
-On the public testnet gateway, `dytallix contract info <contract-address>` is the
-canonical verification path if `/tx/<hash>` indexing lags behind contract metadata.
+On the public testnet profile, the CLI routes contract commands through
+`https://dytallix.com/rpc` automatically. If you override the endpoint
+manually, use a direct node base URL or `https://dytallix.com/rpc` rather than
+`https://dytallix.com`.
+
+`dytallix contract info <contract-address>` is the canonical verification path if
+`/tx/<hash>` indexing lags behind contract metadata.
 
 ## Local Files
 
