@@ -7,10 +7,12 @@ use dytallix_sdk::transaction::TransactionBuilder;
 use dytallix_sdk::Token;
 
 use crate::commands::{
-    active_entry, active_keypair, configured_client, format_number, humanize_sdk_error,
-    load_keystore, validate_address,
+    active_entry, active_keypair, configured_client, format_micro_amount, format_number,
+    humanize_sdk_error, load_keystore, validate_address,
 };
 use crate::output;
+
+const MICROS_PER_TOKEN: u128 = 1_000_000;
 
 /// Arguments for the `send` command.
 #[derive(Debug, Clone, Args)]
@@ -81,15 +83,14 @@ pub async fn run(args: SendArgs) -> Result<()> {
         .nonce(account.nonce)
         .build()
         .map_err(|err| anyhow!(err.to_string()))?;
-    let (tx, fee) = tx
-        .with_estimated_fee(&client)
-        .await
-        .map_err(humanize_sdk_error)?;
-    let available_fee_balance_micro = account.balance.dgt.saturating_mul(1_000_000);
-    if available_fee_balance_micro < fee.total_cost_drt {
+    let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
+
+    let required_fee_micro = fee.total_cost_drt;
+    let available_fee_micro = account.balance.dgt.saturating_mul(MICROS_PER_TOKEN);
+    if available_fee_micro < required_fee_micro {
         return Err(anyhow!(
 			"Insufficient DGT for gas fees. Required: {} DGT. Available: {} DGT. Run dytallix faucet to get more.",
-			format_micro_amount(fee.total_cost_drt),
+			format_micro_amount(required_fee_micro),
 			format_number(account.balance.dgt)
 		));
     }
@@ -107,19 +108,6 @@ pub async fn run(args: SendArgs) -> Result<()> {
 
 fn validate_destination_before_network(raw: &str) -> Result<dytallix_core::address::DAddr> {
     validate_address(raw)
-}
-
-fn format_micro_amount(value: u128) -> String {
-    let whole = value / 1_000_000;
-    let fractional = value % 1_000_000;
-    if fractional == 0 {
-        whole.to_string()
-    } else {
-        format!("{whole}.{fractional:06}")
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_owned()
-    }
 }
 
 #[cfg(test)]

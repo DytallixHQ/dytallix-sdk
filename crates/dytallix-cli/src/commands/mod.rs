@@ -202,6 +202,21 @@ pub(crate) fn format_number(value: u128) -> String {
     out.chars().rev().collect()
 }
 
+/// Formats a micro-denominated token amount using up to 6 decimal places.
+pub(crate) fn format_micro_amount(value: u128) -> String {
+    let whole = value / 1_000_000;
+    let fractional = value % 1_000_000;
+
+    if fractional == 0 {
+        whole.to_string()
+    } else {
+        format!("{whole}.{fractional:06}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_owned()
+    }
+}
+
 pub(crate) fn display_path(path: &Path) -> String {
     let home = home_dir();
     if let Ok(stripped) = path.strip_prefix(&home) {
@@ -236,7 +251,7 @@ pub(crate) fn bytes_to_hex(bytes: &[u8]) -> String {
 
 pub(crate) fn hex_to_bytes(raw: &str) -> Result<Vec<u8>> {
     let trimmed = raw.trim();
-    if trimmed.len() % 2 != 0 {
+    if !trimmed.len().is_multiple_of(2) {
         return Err(anyhow!(
             "Invalid hex input. Provide an even number of characters."
         ));

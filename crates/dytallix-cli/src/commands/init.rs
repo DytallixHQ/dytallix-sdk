@@ -97,7 +97,7 @@ where
     println!("  dytallix send {} 100", short_address(&address));
     println!();
     println!("  Sends 100 DRT to any address.");
-    println!("  Gas paid in DRT automatically.");
+    println!("  Gas paid in DGT automatically.");
     println!("  Fee breakdown shown before confirmation.");
     println!("  Run it now to hit Milestone 2.");
     println!();
@@ -107,7 +107,7 @@ where
     println!();
     println!("  dytallix contract deploy ./my_contract.wasm");
     println!();
-    println!("  Gas paid in DRT automatically.");
+    println!("  Gas paid in DGT automatically.");
     println!("  Fee breakdown shown before confirmation.");
     println!("  See docs/getting-started.md for a");
     println!("  complete walkthrough to Milestone 3.");
