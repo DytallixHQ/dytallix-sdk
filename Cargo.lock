@@ -328,7 +328,6 @@ dependencies = [
  "fips204",
  "pqcrypto-sphincsplus",
  "pqcrypto-traits",
- "rand_core",
  "serde",
  "thiserror",
 ]
