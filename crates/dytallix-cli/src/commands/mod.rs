@@ -317,9 +317,34 @@ pub(crate) async fn raw_post_json_at(endpoint: &str, path: &str, payload: &Value
     } else {
         let status = response.status();
         let reason = response.text().await.unwrap_or_default();
+        if let Some(message) = public_gateway_contract_write_hint(endpoint, path, status) {
+            return Err(anyhow!(message));
+        }
         Err(anyhow!(
             "Request to {url} failed with status {status}. {reason}"
         ))
+    }
+}
+
+fn public_gateway_contract_write_hint(
+    endpoint: &str,
+    path: &str,
+    status: reqwest::StatusCode,
+) -> Option<String> {
+    let endpoint = endpoint.trim_end_matches('/');
+    let is_public_website = matches!(endpoint, "https://dytallix.com" | "https://www.dytallix.com");
+    let is_contract_write = matches!(path, "/contracts/deploy" | "/contracts/call");
+    let is_gateway_rejection = matches!(
+        status,
+        reqwest::StatusCode::METHOD_NOT_ALLOWED | reqwest::StatusCode::NOT_FOUND
+    );
+
+    if is_public_website && is_contract_write && is_gateway_rejection {
+        Some(format!(
+            "The public website gateway at {endpoint} does not currently expose `{path}`. Use `dytallix config set endpoint http://localhost:3030` for a local node or set `DYTALLIX_ENDPOINT` to a direct node that serves contract write routes."
+        ))
+    } else {
+        None
     }
 }
 

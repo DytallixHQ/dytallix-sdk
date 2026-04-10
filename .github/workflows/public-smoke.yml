@@ -28,24 +28,12 @@ jobs:
       - name: Verify first transaction against live testnet
         run: bash scripts/public_smoke.sh first-transaction
 
-  contract-deploy:
+  contract-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Verify contract deploy happy path
-        run: bash scripts/public_smoke.sh contract-deploy
-
-  contract-lifecycle:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      DYTALLIX_ENDPOINT: https://www.dytallix.com
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Verify contract lifecycle against live public gateway
-        run: bash scripts/public_smoke.sh contract-lifecycle
+      - name: Verify contract build path
+        run: bash scripts/public_smoke.sh contract-build

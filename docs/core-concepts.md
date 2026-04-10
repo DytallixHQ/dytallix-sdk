@@ -88,7 +88,7 @@ The CLI supports three network profiles:
 | --- | --- | --- |
 | `testnet` | `https://dytallix.com` | `https://dytallix.com/api/faucet` |
 | `mainnet` | `https://mainnet.dytallix.com` | Not available |
-| `local` | `http://localhost:8545` | `http://localhost:3004` |
+| `local` | `http://localhost:3030` | `http://localhost:3004` |
 
 The current profile is stored in `~/.dytallix/config.json` and can be changed
 with `dytallix config network <testnet|mainnet|local>`.

@@ -16,3 +16,8 @@
 - Onboarding docs now distinguish the working funded-wallet and transaction
 	flow from contract deploy, which still requires an endpoint that accepts
 	`POST /contracts/deploy`
+- CLI contract writes now explain when the public website gateway does not
+	expose `/contracts/deploy` or `/contracts/call` and how to switch to a direct
+	node endpoint
+- Public smoke now validates the supported contract build path instead of
+	assuming the public website gateway already forwards contract write routes
