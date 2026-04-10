@@ -324,6 +324,23 @@ pub enum Message {
     },
     /// An arbitrary data payload anchored on-chain.
     Data { from: String, data: String },
+    /// A signed WASM contract deployment.
+    ContractDeploy {
+        from: String,
+        code: String,
+        gas_limit: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        initial_state: Option<String>,
+    },
+    /// A signed contract call.
+    ContractCall {
+        from: String,
+        address: String,
+        method: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args: Option<String>,
+        gas_limit: u64,
+    },
 }
 
 impl Token {
@@ -377,6 +394,9 @@ fn message_execution_gas(message: &Message) -> u64 {
             .saturating_add(KV_WRITE_GAS)
             .saturating_add(KV_WRITE_GAS),
         Message::Data { data, .. } => data.len() as u64,
+        Message::ContractDeploy { gas_limit, .. } | Message::ContractCall { gas_limit, .. } => {
+            *gas_limit
+        }
     }
 }
 
@@ -385,13 +405,16 @@ impl Message {
         match self {
             Self::Send { from, .. } => from,
             Self::Data { from, .. } => from,
+            Self::ContractDeploy { from, .. } => from,
+            Self::ContractCall { from, .. } => from,
         }
     }
 
     fn send_recipient(&self) -> Option<&str> {
         match self {
             Self::Send { to, .. } => Some(to),
-            Self::Data { .. } => None,
+            Self::Data { .. } | Self::ContractDeploy { .. } => None,
+            Self::ContractCall { address, .. } => Some(address),
         }
     }
 }

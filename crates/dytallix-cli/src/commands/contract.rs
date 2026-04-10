@@ -5,16 +5,23 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
+use dytallix_sdk::transaction::{Message, Transaction};
 use serde_json::{json, Value};
 
 use crate::commands::{
-    active_entry, bytes_to_hex, display_path, hex_to_bytes, load_keystore, raw_get_json,
-    raw_post_json, read_bytes,
+    active_entry, active_keypair, bytes_to_hex, configured_client, display_path,
+    format_micro_amount, format_number, hex_to_bytes, humanize_sdk_error, load_keystore,
+    raw_get_json, raw_post_json, read_bytes,
 };
 use crate::output;
 
 const DEPLOY_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(15);
 const DEPLOY_CONFIRMATION_POLL_INTERVAL: Duration = Duration::from_millis(750);
+const CALL_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(15);
+const CALL_CONFIRMATION_POLL_INTERVAL: Duration = Duration::from_millis(750);
+const CONTRACT_DEPLOY_GAS_LIMIT: u64 = 1_000_000;
+const CONTRACT_CALL_GAS_LIMIT: u64 = 1_000_000;
+const MICROS_PER_TOKEN: u128 = 1_000_000;
 
 /// Arguments for the `contract` command.
 #[derive(Debug, Clone, Args)]
@@ -68,15 +75,16 @@ pub async fn run(args: ContractArgs) -> Result<()> {
 
 async fn deploy(wasm_file: PathBuf) -> Result<()> {
     let wasm = validated_wasm_bytes(&wasm_file)?;
-    let keystore = load_keystore()?;
-    let sender = active_entry(&keystore)?.address.to_string();
+    let signed = sign_contract_transaction(Message::ContractDeploy {
+        from: active_sender()?.to_string(),
+        code: bytes_to_hex(&wasm),
+        gas_limit: CONTRACT_DEPLOY_GAS_LIMIT,
+        initial_state: None,
+    })
+    .await?;
     let value = raw_post_json(
         "/contracts/deploy",
-        &json!({
-            "deployer": sender,
-            "code": bytes_to_hex(&wasm),
-            "gas_limit": 1_000_000u64,
-        }),
+        &json!({ "signed_tx": signed }),
     )
     .await?;
     let tx_hash = value
@@ -140,22 +148,50 @@ async fn deploy(wasm_file: PathBuf) -> Result<()> {
 
 async fn call(address: String, method: String, args: Vec<String>) -> Result<()> {
     let contract = validate_contract_address(&address)?;
+    let signed = sign_contract_transaction(Message::ContractCall {
+        from: active_sender()?.to_string(),
+        address: contract.clone(),
+        method: method.clone(),
+        args: (!args.is_empty()).then(|| encode_contract_args(&args)),
+        gas_limit: CONTRACT_CALL_GAS_LIMIT,
+    })
+    .await?;
     let value = raw_post_json(
         "/contracts/call",
-        &json!({
-            "address": contract,
-            "method": method,
-            "args": encode_contract_args(&args),
-            "gas_limit": 1_000_000u64,
-        }),
+        &json!({ "signed_tx": signed }),
     )
     .await?;
-    if let Some(tx_hash) = value.get("tx_hash").and_then(|raw| raw.as_str()) {
+    let tx_hash = value
+        .get("tx_hash")
+        .and_then(|raw| raw.as_str())
+        .map(str::to_owned);
+    if let Some(tx_hash) = tx_hash.as_deref() {
         output::tx_hash(tx_hash);
     }
+
+    if let Some(tx_hash) = tx_hash.as_deref() {
+        let mut services = RealDeployConfirmationServices;
+        if wait_for_transaction_confirmation(
+            &mut services,
+            tx_hash,
+            CALL_CONFIRMATION_TIMEOUT,
+            CALL_CONFIRMATION_POLL_INTERVAL,
+        )
+        .await?
+        {
+            output::success("Contract call confirmed", None);
+            println!("Indexed via: /tx/{tx_hash}");
+        } else {
+            output::warning(&format!(
+                "Contract call submitted but was not indexed within {:.1}s.",
+                CALL_CONFIRMATION_TIMEOUT.as_secs_f64()
+            ));
+        }
+    }
+
     output::section("Contract call");
     println!("{}", serde_json::to_string_pretty(&value)?);
-    output::success("Contract call executed", None);
+    output::success("Contract call submitted", None);
     Ok(())
 }
 
@@ -232,6 +268,56 @@ fn print_canonical_contract_verification(address: Option<&str>) {
     }
 }
 
+fn active_sender() -> Result<dytallix_core::address::DAddr> {
+    let keystore = load_keystore()?;
+    Ok(active_entry(&keystore)?.address.clone())
+}
+
+async fn sign_contract_transaction(
+    message: Message,
+) -> Result<dytallix_sdk::transaction::SignedTransaction> {
+    let keystore = load_keystore()?;
+    let active = active_entry(&keystore)?;
+    let keypair = active_keypair(&keystore)?;
+    let client = configured_client().await?;
+    let account = client
+        .get_account(&active.address)
+        .await
+        .map_err(humanize_sdk_error)?;
+
+    let gas_limit = match &message {
+        Message::ContractDeploy { gas_limit, .. } | Message::ContractCall { gas_limit, .. } => {
+            *gas_limit
+        }
+        _ => return Err(anyhow!("unsupported contract message type")),
+    };
+
+    let tx = Transaction {
+        chain_id: "dyt-local-1".to_string(),
+        nonce: account.nonce,
+        msgs: vec![message],
+        fee: 0,
+        memo: String::new(),
+        c_gas_limit: gas_limit,
+        b_gas_limit: 0,
+    };
+    let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
+    let required_fee_micro = fee.total_cost_drt;
+    let available_fee_micro = account.balance.dgt.saturating_mul(MICROS_PER_TOKEN);
+    if available_fee_micro < required_fee_micro {
+        return Err(anyhow!(
+            "Insufficient DGT for gas fees. Required: {} DGT. Available: {} DGT. Run dytallix faucet to get more.",
+            format_micro_amount(required_fee_micro),
+            format_number(account.balance.dgt)
+        ));
+    }
+
+    output::fee_breakdown(&fee);
+    tx.with_fee_micro(required_fee_micro)
+        .sign(&keypair)
+        .map_err(humanize_sdk_error)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeployConfirmationVia {
     Transaction,
@@ -301,6 +387,29 @@ where
 
         if started.elapsed() >= timeout {
             return Ok(None);
+        }
+
+        services.wait(poll_interval).await;
+    }
+}
+
+async fn wait_for_transaction_confirmation<S>(
+    services: &mut S,
+    tx_hash: &str,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<bool>
+where
+    S: DeployConfirmationServices,
+{
+    let started = Instant::now();
+    loop {
+        if services.get_json(&format!("/tx/{tx_hash}")).await.is_ok() {
+            return Ok(true);
+        }
+
+        if started.elapsed() >= timeout {
+            return Ok(false);
         }
 
         services.wait(poll_interval).await;
