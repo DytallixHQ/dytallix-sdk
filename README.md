@@ -110,6 +110,12 @@ dytallix send <daddr> 100
 dytallix contract deploy ./my_contract.wasm
 ```
 
+The default testnet profile supports the funded wallet flow and transaction
+submission today. Contract deploy requires an endpoint that accepts
+`POST /contracts/deploy`; if the public gateway returns `405 Method Not Allowed`,
+point the CLI at a direct node or local node with `DYTALLIX_ENDPOINT` or
+`dytallix config set endpoint ...`.
+
 See [Getting started](docs/getting-started.md) and the
 [CLI reference](docs/cli-reference.md) for the full flow.
 

@@ -1,5 +1,5 @@
 //! Send your first transaction on the Dytallix testnet.
-//! Run with: cargo run --example first-transaction
+//! Run with: cargo run -p dytallix-sdk --features network --example first-transaction
 
 use dytallix_core::keypair::DytallixKeypair;
 use dytallix_sdk::client::DytallixClient;

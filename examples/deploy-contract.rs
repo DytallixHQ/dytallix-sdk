@@ -1,5 +1,5 @@
 //! Deploy your first WASM smart contract on the Dytallix testnet.
-//! Run with: cargo run --example deploy-contract
+//! Run with: cargo run -p dytallix-cli --example deploy-contract
 //! Run dytallix init first if you have not already.
 
 use dytallix_sdk::keystore::Keystore;

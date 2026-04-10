@@ -111,6 +111,14 @@ Prepare a first contract deployment:
 dytallix contract deploy ./my_contract.wasm
 ```
 
+Contract deploy uses `POST /contracts/deploy` on the active endpoint. If the
+default public gateway returns `405 Method Not Allowed`, point the CLI at a
+direct node or local node first:
+
+```bash
+dytallix config set endpoint http://localhost:3030
+```
+
 After deploy, verify the indexed contract metadata with:
 
 ```bash

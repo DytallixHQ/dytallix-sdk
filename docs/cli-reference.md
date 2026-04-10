@@ -149,7 +149,10 @@ dytallix contract query <contract> get_count
 
 Current public behavior:
 
-- `deploy` posts WASM bytes to `https://dytallix.com/contracts/deploy`
+- `deploy` posts WASM bytes to `/contracts/deploy` on the active endpoint
+- the default public gateway may not accept deploy requests; if it returns
+  `405 Method Not Allowed`, point the CLI at a direct node endpoint or a local
+  node with `DYTALLIX_ENDPOINT` or `dytallix config set endpoint http://localhost:3030`
 - `deploy` polls `/tx/<hash>` and `/api/contracts/<address>` after submission and prints a confirmed state as soon as one of those public routes is indexed
 - `deploy` prints `dytallix contract info <address>` as the canonical contract verification path on the public gateway when `/tx/<hash>` lags
 - `call` posts method execution requests to `https://dytallix.com/contracts/call`
