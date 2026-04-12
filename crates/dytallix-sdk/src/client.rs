@@ -75,11 +75,11 @@ impl DytallixClient {
         let path = match id {
             BlockId::Number(number) => format!("/block/{number}"),
             BlockId::Hash(hash) => format!("/block/{hash}"),
-            BlockId::Latest => "/blocks".to_owned(),
-            BlockId::Finalized => "/blocks".to_owned(),
+            BlockId::Latest | BlockId::Finalized => "/block/latest".to_owned(),
         };
 
-        self.get_json(&path).await
+        let block: BlockResponse = self.get_json(&path).await?;
+        Ok(block.into())
     }
 
     /// Fetches a transaction receipt by hash.
@@ -348,6 +348,50 @@ impl From<TransactionReceiptResponse> for TransactionReceipt {
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct BlockResponse {
+    #[serde(alias = "number", alias = "height")]
+    number: u64,
+    hash: String,
+    #[serde(default, alias = "parent", alias = "parent_hash")]
+    parent_hash: String,
+    #[serde(default)]
+    proposer: Option<DAddr>,
+    #[serde(default)]
+    slot: u64,
+    #[serde(default)]
+    epoch: u64,
+    #[serde(default)]
+    c_gas_used: u64,
+    #[serde(default)]
+    b_gas_used: u64,
+    #[serde(default)]
+    timestamp: u64,
+    #[serde(default)]
+    txs: Vec<serde_json::Value>,
+}
+
+impl From<BlockResponse> for Block {
+    fn from(value: BlockResponse) -> Self {
+        Self {
+            number: value.number,
+            hash: value.hash,
+            parent_hash: value.parent_hash,
+            proposer: value.proposer.unwrap_or_else(unknown_block_proposer),
+            slot: value.slot,
+            epoch: value.epoch,
+            tx_count: value.txs.len(),
+            c_gas_used: value.c_gas_used,
+            b_gas_used: value.b_gas_used,
+            timestamp: value.timestamp,
+        }
+    }
+}
+
+fn unknown_block_proposer() -> DAddr {
+    DAddr::from_public_key(&[0u8; 1_952]).expect("fixed placeholder proposer key is valid")
+}
+
 fn deserialize_balances<'de, D>(deserializer: D) -> Result<Balance, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -412,8 +456,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_endpoint, public_gateway_path, transaction_submit_path, DytallixClient,
-        LOCAL_NODE_ENDPOINT, PUBLIC_TESTNET_ENDPOINT,
+        normalize_endpoint, public_gateway_path, transaction_submit_path, BlockResponse,
+        DytallixClient, LOCAL_NODE_ENDPOINT, PUBLIC_TESTNET_ENDPOINT,
     };
     use crate::error::SdkError;
     use dytallix_core::address::DAddr;
@@ -459,6 +503,30 @@ mod tests {
         );
         assert_eq!(transaction_submit_path(LOCAL_NODE_ENDPOINT), "/submit");
         assert_eq!(transaction_submit_path("http://127.0.0.1:43030"), "/submit");
+    }
+
+    #[test]
+    fn block_response_maps_minimal_node_payload() {
+        let parsed: BlockResponse = serde_json::from_str(
+            r#"{
+                "asset_hashes": [],
+                "hash": "0xabc",
+                "height": 42,
+                "parent": "0xdef",
+                "timestamp": 1776025359,
+                "txs": []
+            }"#,
+        )
+        .unwrap();
+
+        let block: crate::Block = parsed.into();
+        assert_eq!(block.number, 42);
+        assert_eq!(block.hash, "0xabc");
+        assert_eq!(block.parent_hash, "0xdef");
+        assert_eq!(block.timestamp, 1776025359);
+        assert_eq!(block.tx_count, 0);
+        assert_eq!(block.slot, 0);
+        assert_eq!(block.epoch, 0);
     }
 
     #[tokio::test]
