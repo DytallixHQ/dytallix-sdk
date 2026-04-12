@@ -104,7 +104,7 @@ impl DytallixClient {
         &self,
         tx: &SignedTransaction,
     ) -> Result<TransactionReceipt, SdkError> {
-        let url = self.url("/api/blockchain/submit")?;
+        let url = self.url(transaction_submit_path(&self.endpoint))?;
         let tx_hash = tx.hash();
         let response = self
             .http
@@ -245,6 +245,14 @@ fn public_gateway_path(endpoint: &str, path: &str) -> String {
         format!("/api/blockchain{path}")
     } else {
         path.to_owned()
+    }
+}
+
+fn transaction_submit_path(endpoint: &str) -> &'static str {
+    if endpoint == PUBLIC_TESTNET_ENDPOINT {
+        "/api/blockchain/submit"
+    } else {
+        "/submit"
     }
 }
 
@@ -404,8 +412,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_endpoint, public_gateway_path, DytallixClient, LOCAL_NODE_ENDPOINT,
-        PUBLIC_TESTNET_ENDPOINT,
+        normalize_endpoint, public_gateway_path, transaction_submit_path, DytallixClient,
+        LOCAL_NODE_ENDPOINT, PUBLIC_TESTNET_ENDPOINT,
     };
     use crate::error::SdkError;
     use dytallix_core::address::DAddr;
@@ -441,6 +449,16 @@ mod tests {
             public_gateway_path(LOCAL_NODE_ENDPOINT, "/status"),
             "/status"
         );
+    }
+
+    #[test]
+    fn submit_path_uses_direct_node_route_when_needed() {
+        assert_eq!(
+            transaction_submit_path(PUBLIC_TESTNET_ENDPOINT),
+            "/api/blockchain/submit"
+        );
+        assert_eq!(transaction_submit_path(LOCAL_NODE_ENDPOINT), "/submit");
+        assert_eq!(transaction_submit_path("http://127.0.0.1:43030"), "/submit");
     }
 
     #[tokio::test]
