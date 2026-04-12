@@ -103,6 +103,13 @@ dytallix balance
 dytallix faucet status
 ```
 
+The default public testnet endpoint serves blockchain JSON under
+`/api/blockchain/...` on `https://dytallix.com`. The SDK and CLI handle that
+gateway prefix automatically; if you are probing the public endpoint manually,
+use `/api/blockchain/balance/...`, `/api/blockchain/account/...`,
+`/api/blockchain/status`, and `/api/blockchain/submit` instead of the bare
+website paths.
+
 After the wallet is funded, common next steps are:
 
 ```bash

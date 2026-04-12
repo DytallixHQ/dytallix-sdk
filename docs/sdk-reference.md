@@ -114,8 +114,10 @@ let faucet = FaucetClient::testnet();
 
 The public website gateway supports the account, balance, block, transaction,
 fee-estimation, faucet, and submission flows used by the shipped examples.
-Validator and delegation reads still require a direct node endpoint today
-because the public website gateway does not expose those legacy JSON routes.
+Those JSON routes are exposed under `/api/blockchain/...` on
+`https://dytallix.com`, not the bare website paths. Validator and delegation
+reads still require a direct node endpoint today because the public website
+gateway does not expose those legacy JSON routes.
 
 ### Keystore
 

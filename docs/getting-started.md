@@ -93,6 +93,13 @@ dytallix wallet info
 dytallix balance
 ```
 
+When you use the default public endpoint at `https://dytallix.com`, the
+website gateway exposes blockchain JSON under `/api/blockchain/...`. The CLI
+handles that prefix for you, but manual checks should use
+`/api/blockchain/balance/<daddr>`, `/api/blockchain/account/<daddr>`,
+`/api/blockchain/status`, and `/api/blockchain/submit` rather than the bare
+website routes.
+
 Check faucet eligibility:
 
 ```bash

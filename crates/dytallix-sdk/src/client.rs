@@ -195,7 +195,7 @@ impl DytallixClient {
     }
 
     fn url(&self, path: &str) -> Result<Url, SdkError> {
-        let joined = format!("{}{}", self.endpoint, path);
+        let joined = format!("{}{}", self.endpoint, public_gateway_path(&self.endpoint, path));
         Url::parse(&joined).map_err(|err| SdkError::Network(err.to_string()))
     }
 
@@ -238,6 +238,14 @@ fn normalize_endpoint(endpoint: &str) -> Result<String, SdkError> {
         normalized.pop();
     }
     Ok(normalized)
+}
+
+fn public_gateway_path(endpoint: &str, path: &str) -> String {
+    if endpoint == PUBLIC_TESTNET_ENDPOINT && !path.starts_with("/api/blockchain/") {
+        format!("/api/blockchain{path}")
+    } else {
+        path.to_owned()
+    }
 }
 
 fn serialization_error(err: reqwest::Error) -> SdkError {
@@ -395,7 +403,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_endpoint, DytallixClient, LOCAL_NODE_ENDPOINT, PUBLIC_TESTNET_ENDPOINT};
+    use super::{
+        normalize_endpoint, public_gateway_path, DytallixClient, LOCAL_NODE_ENDPOINT,
+        PUBLIC_TESTNET_ENDPOINT,
+    };
     use crate::error::SdkError;
     use dytallix_core::address::DAddr;
     use dytallix_core::keypair::DytallixKeypair;
@@ -409,6 +420,26 @@ mod tests {
         assert_eq!(
             normalize_endpoint("http://localhost:3030///").unwrap(),
             LOCAL_NODE_ENDPOINT
+        );
+    }
+
+    #[test]
+    fn public_gateway_paths_are_prefixed() {
+        assert_eq!(
+            public_gateway_path(PUBLIC_TESTNET_ENDPOINT, "/balance/demo"),
+            "/api/blockchain/balance/demo"
+        );
+        assert_eq!(
+            public_gateway_path(PUBLIC_TESTNET_ENDPOINT, "/status"),
+            "/api/blockchain/status"
+        );
+        assert_eq!(
+            public_gateway_path(PUBLIC_TESTNET_ENDPOINT, "/api/blockchain/submit"),
+            "/api/blockchain/submit"
+        );
+        assert_eq!(
+            public_gateway_path(LOCAL_NODE_ENDPOINT, "/status"),
+            "/status"
         );
     }
 
