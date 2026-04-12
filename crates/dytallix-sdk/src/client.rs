@@ -91,12 +91,7 @@ impl DytallixClient {
     /// Fetches the current chain status.
     pub async fn get_chain_status(&self) -> Result<ChainStatus, SdkError> {
         let status: ChainStatusResponse = self.get_json("/status").await?;
-        Ok(ChainStatus {
-            block_height: status.latest_height,
-            epoch: 0,
-            slot: 0,
-            finalized_checkpoint: status.chain_id,
-        })
+        Ok(status.into())
     }
 
     /// Submits a signed transaction to the node and returns its receipt.
@@ -289,7 +284,22 @@ struct ChainStatusResponse {
     chain_id: String,
     latest_height: u64,
     #[serde(default)]
+    epoch: u64,
+    #[serde(default)]
+    slot: u64,
+    #[serde(default)]
     gas: Option<ChainGasResponse>,
+}
+
+impl From<ChainStatusResponse> for ChainStatus {
+    fn from(value: ChainStatusResponse) -> Self {
+        Self {
+            block_height: value.latest_height,
+            epoch: value.epoch,
+            slot: value.slot,
+            finalized_checkpoint: value.chain_id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
@@ -457,7 +467,7 @@ where
 mod tests {
     use super::{
         normalize_endpoint, public_gateway_path, transaction_submit_path, BlockResponse,
-        DytallixClient, LOCAL_NODE_ENDPOINT, PUBLIC_TESTNET_ENDPOINT,
+        ChainStatusResponse, DytallixClient, LOCAL_NODE_ENDPOINT, PUBLIC_TESTNET_ENDPOINT,
     };
     use crate::error::SdkError;
     use dytallix_core::address::DAddr;
@@ -527,6 +537,25 @@ mod tests {
         assert_eq!(block.tx_count, 0);
         assert_eq!(block.slot, 0);
         assert_eq!(block.epoch, 0);
+    }
+
+    #[test]
+    fn chain_status_response_maps_epoch_and_slot() {
+        let parsed: ChainStatusResponse = serde_json::from_str(
+            r#"{
+                "chain_id": "dyt-local-1",
+                "latest_height": 303461,
+                "epoch": 52,
+                "slot": 3940
+            }"#,
+        )
+        .unwrap();
+
+        let status: crate::ChainStatus = parsed.into();
+        assert_eq!(status.block_height, 303461);
+        assert_eq!(status.epoch, 52);
+        assert_eq!(status.slot, 3940);
+        assert_eq!(status.finalized_checkpoint, "dyt-local-1");
     }
 
     #[tokio::test]
