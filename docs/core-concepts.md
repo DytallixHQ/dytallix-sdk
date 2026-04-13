@@ -82,16 +82,19 @@ and `governance`.
 
 ## Network Profiles
 
-The CLI supports three network profiles:
+The public CLI currently supports two network profiles:
 
 | Profile | Node endpoint | Faucet |
 | --- | --- | --- |
 | `testnet` | `https://dytallix.com` | `https://dytallix.com/api/faucet` |
-| `mainnet` | `https://mainnet.dytallix.com` | Not available |
-| `local` | `http://localhost:3030` | `http://localhost:3004` |
+| `local` | `http://localhost:3030` | `http://localhost:3030/dev/faucet` |
 
 The current profile is stored in `~/.dytallix/config.json` and can be changed
-with `dytallix config network <testnet|mainnet|local>`.
+with `dytallix config network <testnet|local>`.
+
+Compatibility aliases such as `/api/status` and `/api/blockchain/...` are
+still available for older clients while canonical reads live on root routes
+like `/status`, `/account/<daddr>`, and `/balance/<daddr>`.
 
 ## Contracts, Governance, and Staking
 
