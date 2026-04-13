@@ -2,6 +2,8 @@
 
 [Docs hub](README.md) | [Getting started](getting-started.md) | [SDK reference](sdk-reference.md)
 
+Keypair, faucet, transfer, and basic contract lifecycle are available for experimentation on the public testnet. Staking, governance, and some advanced or operator paths are not yet production-complete.
+
 ## Identity and Addresses
 
 - Dytallix accounts are PQC-native.
@@ -96,17 +98,46 @@ Compatibility aliases such as `/api/status` and `/api/blockchain/...` are
 still available for older clients while canonical reads live on root routes
 like `/status`, `/account/<daddr>`, and `/balance/<daddr>`.
 
+## Public Faucet Policy
+
+The canonical public testnet faucet grants a fixed `10 DGT` and `100 DRT` per
+successful request.
+
+The current public limiter is:
+
+- `60` second cooldown between successful requests
+- `20` requests per hour
+
+The public faucet is distinct from the local development faucet. Testnet flows
+use `https://dytallix.com/api/faucet`, while local development uses
+`POST /dev/faucet` with explicit micro-unit `udgt` and `udrt` amounts.
+
 ## Contracts, Governance, and Staking
 
-The current CLI submits higher-level operations by encoding intent into the
-transaction `data` bytes:
+The current network surface is intentionally split between public-ready flows
+and unfinished operator-preview flows.
 
-- `stake:*` payloads for delegation flows
-- `governance:*` payloads for proposal and vote flows
-- `contract:*` payloads for deployment and contract calls
+Contract lifecycle on the public gateway uses dedicated contract endpoints.
+Some local or direct-node helpers still encode higher-level intent into
+transaction `data` bytes, but those prefixes should not be treated as a stable
+public protocol.
 
-That keeps the SDK transaction model small while the public network API surface
-is still taking shape.
+In particular, `stake:*` and `governance:*` payloads are not public-ready write
+messages on the default public gateway. Compatible nodes should reject those
+generic submit-path payloads until staking and governance are implemented end to
+end as typed, production-complete flows.
+
+On the default public website gateway:
+
+- basic contract lifecycle flows are available for experimentation
+- public staking writes are disabled
+- public governance writes are disabled
+- validator-set and delegation legacy JSON reads still require a direct node
+- compatible nodes expose `GET /api/capabilities` for machine-readable runtime
+  contract discovery
+
+Use a local node or direct endpoint for unfinished write paths and operator
+workflows.
 
 ## Current Scope
 

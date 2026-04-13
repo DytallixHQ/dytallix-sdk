@@ -19,9 +19,9 @@ use commands::wallet::WalletArgs;
 #[derive(Parser)]
 #[command(
     name = "dytallix",
-    about = "Dytallix testnet CLI — PQC-native Layer 1 blockchain",
+    about = "Dytallix public testnet CLI — early alpha",
     version,
-    long_about = "Official CLI for the Dytallix testnet.\n\nDocumentation: https://dytallix.com/docs\nDiscord: https://discord.gg/eyVvu5kmPG\nExplorer: https://dytallix.com/build/blockchain\nGitHub: https://github.com/DytallixHQ"
+    long_about = "Official CLI for the Dytallix public testnet.\n\nKeypair, faucet, transfer, and basic contract lifecycle are available for experimentation on the public testnet. Staking, governance, and some advanced or operator paths are not yet production-complete.\n\nDocumentation: https://dytallix.com/docs\nDiscord: https://discord.gg/eyVvu5kmPG\nExplorer: https://dytallix.com/build/blockchain\nGitHub: https://github.com/DytallixHQ"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -40,9 +40,9 @@ enum Commands {
     Send(SendArgs),
     /// Request testnet tokens from the faucet.
     Faucet(FaucetArgs),
-    /// Stake and delegation operations.
+    /// Staking status and direct-node staking writes.
     Stake(StakeArgs),
-    /// Governance proposals and voting.
+    /// Governance reads and direct-node governance writes.
     Governance(GovernanceArgs),
     /// Deploy and interact with smart contracts.
     Contract(ContractArgs),

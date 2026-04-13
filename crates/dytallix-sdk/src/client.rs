@@ -1,6 +1,7 @@
 //! Asynchronous HTTP client for Dytallix node APIs.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::Url;
@@ -19,12 +20,36 @@ use dytallix_core::address::DAddr;
 const DEFAULT_PUBLIC_MIN_GAS_PRICE: u64 = 1_000;
 const PUBLIC_TESTNET_ENDPOINT: &str = "https://dytallix.com";
 const LOCAL_NODE_ENDPOINT: &str = "http://localhost:3030";
+const CAPABILITIES_ENDPOINT_PATH: &str = "/api/capabilities";
+const EMBEDDED_PUBLIC_CAPABILITIES_JSON: &str =
+    include_str!("../../../docs/public-capabilities.json");
+
+/// Indicates whether a capabilities document came from a live node or from the
+/// SDK's embedded fallback manifest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilitiesSource {
+    /// The document was fetched successfully from a live node endpoint.
+    LiveNode,
+    /// The live endpoint was unavailable, so the SDK used its embedded manifest.
+    EmbeddedFallback,
+}
+
+impl CapabilitiesSource {
+    /// Returns a stable human-readable label for this source.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LiveNode => "live-node",
+            Self::EmbeddedFallback => "embedded-fallback",
+        }
+    }
+}
 
 /// Asynchronous client for interacting with Dytallix nodes.
 #[derive(Debug, Clone)]
 pub struct DytallixClient {
     endpoint: String,
     http: reqwest::Client,
+    capabilities_cache: Arc<tokio::sync::Mutex<Option<CachedCapabilities>>>,
 }
 
 impl DytallixClient {
@@ -38,6 +63,7 @@ impl DytallixClient {
         Ok(Self {
             endpoint: normalized,
             http,
+            capabilities_cache: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
 
@@ -94,6 +120,22 @@ impl DytallixClient {
         Ok(status.into())
     }
 
+    /// Fetches the machine-readable public capabilities document.
+    ///
+    /// Compatible nodes should serve this from `/api/capabilities`. When that
+    /// endpoint is unavailable, the SDK falls back to its embedded manifest.
+    pub async fn get_capabilities(&self) -> Result<serde_json::Value, SdkError> {
+        self.get_capabilities_with_source().await.map(|(document, _)| document)
+    }
+
+    /// Fetches the machine-readable public capabilities document together with
+    /// the source that supplied it.
+    pub async fn get_capabilities_with_source(
+        &self,
+    ) -> Result<(serde_json::Value, CapabilitiesSource), SdkError> {
+        self.capabilities_json_value().await
+    }
+
     /// Submits a signed transaction to the node and returns its receipt.
     pub async fn submit_transaction(
         &self,
@@ -141,7 +183,11 @@ impl DytallixClient {
 
     /// Fetches the active validator set.
     pub async fn get_validators(&self) -> Result<Vec<Validator>, SdkError> {
-        if self.uses_public_testnet_gateway() {
+        if self.uses_public_testnet_gateway()
+            && self
+                .route_is_direct_node_only("GET /v1/validators")
+                .await?
+        {
             return Err(
                 self.legacy_public_read_unavailable("/v1/validators", "validator-set reads")
             );
@@ -151,7 +197,11 @@ impl DytallixClient {
 
     /// Fetches delegations for the provided delegator address.
     pub async fn get_delegations(&self, address: &DAddr) -> Result<Vec<Delegation>, SdkError> {
-        if self.uses_public_testnet_gateway() {
+        if self.uses_public_testnet_gateway()
+            && self
+                .route_is_direct_node_only("GET /v1/delegations/:address")
+                .await?
+        {
             return Err(self.legacy_public_read_unavailable(
                 &format!("/v1/delegations/{address}"),
                 "delegation reads",
@@ -160,11 +210,28 @@ impl DytallixClient {
         self.get_json(&format!("/v1/delegations/{address}")).await
     }
 
+    /// Returns the advertised feature state from the runtime capabilities endpoint,
+    /// or the embedded SDK manifest when the runtime endpoint is unavailable.
+    pub async fn public_feature_state(&self, feature_key: &str) -> Result<Option<String>, SdkError> {
+        let document = self.capabilities_document().await?;
+        Ok(document.features.get(feature_key).cloned())
+    }
+
+    /// Resolves a GET path against the active endpoint.
+    ///
+    /// When the client targets the default public website gateway, this uses
+    /// the runtime capabilities document when available and the embedded SDK
+    /// manifest otherwise.
+    pub async fn resolve_read_path(&self, path: &str) -> Result<String, SdkError> {
+        self.resolve_get_path(path).await
+    }
+
     async fn get_json<T>(&self, path: &str) -> Result<T, SdkError>
     where
         T: DeserializeOwned,
     {
-        let url = self.url(path)?;
+        let resolved_path = self.resolve_read_path(path).await?;
+        let url = self.url(&resolved_path)?;
         let response =
             self.http
                 .get(url.clone())
@@ -190,7 +257,11 @@ impl DytallixClient {
     }
 
     fn url(&self, path: &str) -> Result<Url, SdkError> {
-        let joined = format!("{}{}", self.endpoint, public_gateway_path(&self.endpoint, path));
+        let joined = format!(
+            "{}{}",
+            self.endpoint,
+            public_gateway_path(&self.endpoint, path)
+        );
         Url::parse(&joined).map_err(|err| SdkError::Network(err.to_string()))
     }
 
@@ -202,6 +273,81 @@ impl DytallixClient {
         })
     }
 
+    async fn capabilities_document(&self) -> Result<CapabilityDocument, SdkError> {
+        Ok(self.cached_capabilities().await?.document)
+    }
+
+    async fn capabilities_json_value(&self) -> Result<(serde_json::Value, CapabilitiesSource), SdkError> {
+        let cached = self.cached_capabilities().await?;
+        Ok((cached.json, cached.source))
+    }
+
+    async fn cached_capabilities(&self) -> Result<CachedCapabilities, SdkError> {
+        if let Some(cached) = self.capabilities_cache.lock().await.clone() {
+            return Ok(cached);
+        }
+
+        let loaded = match self.try_get_capabilities_payload().await {
+            Ok(cached) => cached,
+            Err(_) => embedded_capabilities_payload()?,
+        };
+
+        let mut guard = self.capabilities_cache.lock().await;
+        *guard = Some(loaded.clone());
+        Ok(loaded)
+    }
+
+    async fn try_get_capabilities_payload(&self) -> Result<CachedCapabilities, SdkError> {
+        let url = Url::parse(&format!("{}{}", self.endpoint, CAPABILITIES_ENDPOINT_PATH))
+            .map_err(|err| SdkError::Network(err.to_string()))?;
+        let response = self
+            .http
+            .get(url.clone())
+            .send()
+            .await
+            .map_err(|err| SdkError::NodeUnavailable {
+                endpoint: url.to_string(),
+                reason: err.to_string(),
+            })?;
+
+        if response.status().is_success() {
+            let json: serde_json::Value = response.json().await.map_err(serialization_error)?;
+            let document: CapabilityDocument = serde_json::from_value(json.clone())
+                .map_err(|err| SdkError::Serialization(err.to_string()))?;
+            Ok(CachedCapabilities {
+                document,
+                json,
+                source: CapabilitiesSource::LiveNode,
+            })
+        } else {
+            let reason = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "request failed".to_owned());
+            Err(SdkError::NodeUnavailable {
+                endpoint: url.to_string(),
+                reason,
+            })
+        }
+    }
+
+    async fn route_is_direct_node_only(&self, route: &str) -> Result<bool, SdkError> {
+        let document = self.capabilities_document().await?;
+        Ok(document
+            .direct_node_only_routes()
+            .iter()
+            .any(|candidate| candidate == route))
+    }
+
+    async fn resolve_get_path(&self, path: &str) -> Result<String, SdkError> {
+        if !self.uses_public_testnet_gateway() {
+            return Ok(path.to_owned());
+        }
+
+        let document = self.capabilities_document().await?;
+        Ok(resolve_public_gateway_get_path(path, &document))
+    }
+
     fn uses_public_testnet_gateway(&self) -> bool {
         self.endpoint == PUBLIC_TESTNET_ENDPOINT
     }
@@ -210,7 +356,7 @@ impl DytallixClient {
         SdkError::NodeUnavailable {
             endpoint: format!("{}{}", self.endpoint, path),
             reason: format!(
-                "{feature} are not exposed as public JSON routes on the website gateway. Connect the SDK to a direct node endpoint that serves `{path}` or use the documented public routes at https://dytallix.com/docs."
+                "{feature} are not exposed as public JSON routes on the website gateway. Check `{CAPABILITIES_ENDPOINT_PATH}` on a compatible node, connect the SDK to a direct node endpoint that serves `{path}`, or use the documented public routes at https://dytallix.com/docs."
             ),
         }
     }
@@ -236,11 +382,61 @@ fn normalize_endpoint(endpoint: &str) -> Result<String, SdkError> {
 }
 
 fn public_gateway_path(endpoint: &str, path: &str) -> String {
-    if endpoint == PUBLIC_TESTNET_ENDPOINT && !path.starts_with("/api/blockchain/") {
+    if endpoint != PUBLIC_TESTNET_ENDPOINT {
+        return path.to_owned();
+    }
+
+    if path.starts_with("/api/") || path.starts_with("/contracts/") {
+        return path.to_owned();
+    }
+
+    let is_blockchain_root_read = matches!(path, "/status" | "/blocks" | "/transactions")
+        || path.starts_with("/account/")
+        || path.starts_with("/balance/")
+        || path.starts_with("/block/")
+        || path.starts_with("/tx/")
+        || path.starts_with("/transactions/");
+
+    if is_blockchain_root_read {
         format!("/api/blockchain{path}")
     } else {
         path.to_owned()
     }
+}
+
+fn resolve_public_gateway_get_path(path: &str, document: &CapabilityDocument) -> String {
+    if path.starts_with("/api/") {
+        return path.to_owned();
+    }
+
+    if document.supports_get_path(path) {
+        return path.to_owned();
+    }
+
+    let prefixed = format!("/api/blockchain{path}");
+    if document.supports_get_path(&prefixed) {
+        return prefixed;
+    }
+
+    public_gateway_path(PUBLIC_TESTNET_ENDPOINT, path)
+}
+
+fn embedded_capabilities_document() -> Result<CapabilityDocument, SdkError> {
+    serde_json::from_str(EMBEDDED_PUBLIC_CAPABILITIES_JSON)
+        .map_err(|err| SdkError::Serialization(err.to_string()))
+}
+
+fn embedded_capabilities_json_value() -> Result<serde_json::Value, SdkError> {
+    serde_json::from_str(EMBEDDED_PUBLIC_CAPABILITIES_JSON)
+        .map_err(|err| SdkError::Serialization(err.to_string()))
+}
+
+fn embedded_capabilities_payload() -> Result<CachedCapabilities, SdkError> {
+    Ok(CachedCapabilities {
+        document: embedded_capabilities_document()?,
+        json: embedded_capabilities_json_value()?,
+        source: CapabilitiesSource::EmbeddedFallback,
+    })
 }
 
 fn transaction_submit_path(endpoint: &str) -> &'static str {
@@ -311,6 +507,76 @@ struct ChainGasResponse {
 #[derive(Debug, Clone, Copy)]
 struct NetworkGasParams {
     min_gas_price: u64,
+}
+
+#[derive(Debug, Clone)]
+struct CachedCapabilities {
+    document: CapabilityDocument,
+    json: serde_json::Value,
+    source: CapabilitiesSource,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct CapabilityDocument {
+    #[serde(default)]
+    features: BTreeMap<String, String>,
+    #[serde(default, rename = "publicRoutes")]
+    public_routes: CapabilityPublicRoutes,
+    #[serde(default, rename = "publicNode")]
+    public_node: CapabilityPublicNode,
+}
+
+impl CapabilityDocument {
+    fn direct_node_only_routes(&self) -> Vec<String> {
+        let mut routes = self.public_routes.direct_node_only.clone();
+        routes.extend(self.public_node.direct_node_only_routes.clone());
+        routes
+    }
+
+    fn supports_get_path(&self, path: &str) -> bool {
+        self.public_routes
+            .supported
+            .iter()
+            .chain(self.public_node.supported_routes.iter())
+            .filter_map(|route| route.strip_prefix("GET "))
+            .any(|template| route_template_matches(template, path))
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct CapabilityPublicRoutes {
+    #[serde(default, rename = "directNodeOnly")]
+    direct_node_only: Vec<String>,
+    #[serde(default)]
+    supported: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct CapabilityPublicNode {
+    #[serde(default, rename = "directNodeOnlyRoutes")]
+    direct_node_only_routes: Vec<String>,
+    #[serde(default, rename = "supportedRoutes")]
+    supported_routes: Vec<String>,
+}
+
+fn route_template_matches(template: &str, path: &str) -> bool {
+    let template_segments: Vec<&str> = template.trim_start_matches('/').split('/').collect();
+    let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+
+    if template_segments.len() != path_segments.len() {
+        return false;
+    }
+
+    template_segments
+        .iter()
+        .zip(path_segments.iter())
+        .all(|(template_segment, path_segment)| {
+            if template_segment.starts_with(':') {
+                !path_segment.is_empty()
+            } else {
+                template_segment == path_segment
+            }
+        })
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -466,8 +732,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_endpoint, public_gateway_path, transaction_submit_path, BlockResponse,
-        ChainStatusResponse, DytallixClient, LOCAL_NODE_ENDPOINT, PUBLIC_TESTNET_ENDPOINT,
+        embedded_capabilities_document, resolve_public_gateway_get_path, route_template_matches,
+        CapabilitiesSource, normalize_endpoint, public_gateway_path, transaction_submit_path,
+        BlockResponse, ChainStatusResponse, DytallixClient, LOCAL_NODE_ENDPOINT,
+        PUBLIC_TESTNET_ENDPOINT,
     };
     use crate::error::SdkError;
     use dytallix_core::address::DAddr;
@@ -500,9 +768,83 @@ mod tests {
             "/api/blockchain/submit"
         );
         assert_eq!(
+            public_gateway_path(PUBLIC_TESTNET_ENDPOINT, "/api/capabilities"),
+            "/api/capabilities"
+        );
+        assert_eq!(
+            public_gateway_path(PUBLIC_TESTNET_ENDPOINT, "/contracts/deploy"),
+            "/contracts/deploy"
+        );
+        assert_eq!(
             public_gateway_path(LOCAL_NODE_ENDPOINT, "/status"),
             "/status"
         );
+    }
+
+    #[test]
+    fn route_template_matching_handles_placeholder_segments() {
+        assert!(route_template_matches(
+            "/api/blockchain/balance/:address",
+            "/api/blockchain/balance/dytallix1demo"
+        ));
+        assert!(route_template_matches(
+            "/api/blockchain/block/:number|hash|latest|finalized",
+            "/api/blockchain/block/latest"
+        ));
+        assert!(!route_template_matches(
+            "/api/blockchain/block/:number|hash|latest|finalized",
+            "/api/blockchain/block/latest/extra"
+        ));
+    }
+
+    #[test]
+    fn embedded_capabilities_manifest_exposes_runtime_contract_and_direct_routes() {
+        let document = embedded_capabilities_document().unwrap();
+        assert_eq!(
+            document.features.get("stakingWrites").map(String::as_str),
+            Some("hidden")
+        );
+        assert!(document
+            .direct_node_only_routes()
+            .iter()
+            .any(|route| route == "GET /api/capabilities"));
+        assert!(document
+            .direct_node_only_routes()
+            .iter()
+            .any(|route| route == "GET /v1/validators"));
+        assert_eq!(
+            resolve_public_gateway_get_path("/status", &document),
+            "/api/blockchain/status"
+        );
+        assert_eq!(
+            resolve_public_gateway_get_path("/balance/demo", &document),
+            "/api/blockchain/balance/demo"
+        );
+        assert_eq!(
+            resolve_public_gateway_get_path("/api/capabilities", &document),
+            "/api/capabilities"
+        );
+    }
+
+    #[tokio::test]
+    async fn capabilities_api_falls_back_to_embedded_manifest() {
+        let client = DytallixClient::new("http://127.0.0.1:9").await.unwrap();
+        let (capabilities, source) = client.get_capabilities_with_source().await.unwrap();
+
+        assert_eq!(source, CapabilitiesSource::EmbeddedFallback);
+        assert_eq!(
+            capabilities["canonicalStatement"].as_str(),
+            Some("Keypair, faucet, transfer, and basic contract lifecycle are available for experimentation on the public testnet. Staking, governance, and some advanced or operator paths are not yet production-complete.")
+        );
+        assert_eq!(
+            capabilities["features"]["governanceWrites"].as_str(),
+            Some("hidden")
+        );
+        assert!(capabilities["publicRoutes"]["directNodeOnly"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|route| route.as_str() == Some("GET /api/capabilities")));
     }
 
     #[test]

@@ -7,8 +7,8 @@ use dytallix_sdk::transaction::TransactionBuilder;
 use dytallix_sdk::Token;
 
 use crate::commands::{
-    active_entry, active_keypair, configured_client, humanize_sdk_error, load_keystore,
-    raw_get_json, validate_address,
+    active_entry, active_keypair, configured_client, ensure_public_gateway_write_allowed,
+    humanize_sdk_error, load_keystore, raw_get_json, validate_address,
 };
 use crate::output;
 
@@ -23,13 +23,13 @@ pub struct StakeArgs {
 /// Stake subcommands.
 #[derive(Debug, Clone, Subcommand)]
 pub enum StakeCommand {
-    /// Delegate DGT to a validator.
+    /// Delegate DGT to a validator on a local or direct node endpoint.
     Delegate { validator: String, amount: u128 },
-    /// Undelegate DGT from a validator.
+    /// Undelegate DGT from a validator on a local or direct node endpoint.
     Undelegate { validator: String, amount: u128 },
-    /// Claim unclaimed DRT staking rewards.
+    /// Claim unclaimed DRT staking rewards on a local or direct node endpoint.
     Claim,
-    /// Show current delegations.
+    /// Show the current public staking balance view.
     Status,
 }
 
@@ -48,6 +48,8 @@ pub async fn run(args: StakeArgs) -> Result<()> {
 }
 
 async fn submit_stake_tx(operation: &str, validator: &str, amount: u128) -> Result<()> {
+    ensure_public_gateway_write_allowed("staking", "stakingWrites", "dytallix stake status")
+        .await?;
     let validator = validate_address(validator)?;
     let keystore = load_keystore()?;
     let sender = active_entry(&keystore)?.address.clone();
@@ -83,6 +85,8 @@ async fn submit_stake_tx(operation: &str, validator: &str, amount: u128) -> Resu
 }
 
 async fn claim_rewards() -> Result<()> {
+    ensure_public_gateway_write_allowed("staking", "stakingWrites", "dytallix stake status")
+        .await?;
     let keystore = load_keystore()?;
     let sender = active_entry(&keystore)?.address.clone();
     let keypair = active_keypair(&keystore)?;

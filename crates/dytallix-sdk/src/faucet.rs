@@ -115,10 +115,7 @@ impl FaucetClient {
                 retry_after_seconds,
             })
         } else if response.status().as_u16() == 429 {
-            let retry_after_seconds = retry_after_seconds(response.headers());
-            Err(SdkError::FaucetRateLimited {
-                retry_after_seconds,
-            })
+            Err(rate_limited_error(response).await)
         } else {
             let reason = response
                 .text()
@@ -154,10 +151,7 @@ impl FaucetClient {
                 .await
                 .map_err(|err| SdkError::Serialization(err.to_string()))
         } else if response.status().as_u16() == 429 {
-            let retry_after_seconds = retry_after_seconds(response.headers());
-            Err(SdkError::FaucetRateLimited {
-                retry_after_seconds,
-            })
+            Err(rate_limited_error(response).await)
         } else {
             let reason = response
                 .text()
@@ -190,10 +184,7 @@ impl FaucetClient {
 
             Ok(status.limits)
         } else if response.status().as_u16() == 429 {
-            let retry_after_seconds = retry_after_seconds(response.headers());
-            Err(SdkError::FaucetRateLimited {
-                retry_after_seconds,
-            })
+            Err(rate_limited_error(response).await)
         } else {
             let reason = response
                 .text()
@@ -271,17 +262,53 @@ struct FundedAmounts {
     drt: u128,
 }
 
-fn retry_after_seconds(headers: &reqwest::header::HeaderMap) -> u64 {
-    headers
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FaucetRateLimitResponse {
+    #[serde(default, alias = "retry_after_seconds")]
+    retry_after_seconds: Option<u64>,
+    #[serde(default, alias = "retry_after")]
+    retry_after: Option<u64>,
+    #[serde(default, alias = "cooldown_ms")]
+    cooldown_ms: Option<u64>,
+}
+
+async fn rate_limited_error(response: reqwest::Response) -> SdkError {
+    let headers = response.headers().clone();
+    let body = response.text().await.unwrap_or_default();
+    SdkError::FaucetRateLimited {
+        retry_after_seconds: retry_after_seconds(&headers, Some(&body)),
+    }
+}
+
+fn retry_after_seconds(headers: &reqwest::header::HeaderMap, body: Option<&str>) -> u64 {
+    body.and_then(parse_retry_after_seconds)
+        .or_else(|| {
+            headers
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+        })
         .unwrap_or(60)
+}
+
+fn parse_retry_after_seconds(body: &str) -> Option<u64> {
+    let parsed: FaucetRateLimitResponse = serde_json::from_str(body).ok()?;
+    parsed
+        .retry_after_seconds
+        .or(parsed.retry_after)
+        .or_else(|| {
+            parsed
+                .cooldown_ms
+                .map(|milliseconds| milliseconds.div_ceil(1_000))
+        })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::FaucetCheckResponse;
+    use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
+
+    use super::{parse_retry_after_seconds, retry_after_seconds, FaucetCheckResponse};
 
     #[test]
     fn faucet_check_parses_legacy_allowed_shape() {
@@ -298,5 +325,32 @@ mod tests {
             serde_json::from_str(r#"{"canRequest":false,"retryAfterSeconds":120}"#).unwrap();
         assert!(!parsed.can_request);
         assert_eq!(parsed.retry_after_seconds, Some(120));
+    }
+
+    #[test]
+    fn rate_limit_body_parses_retry_after_shape() {
+        assert_eq!(
+            parse_retry_after_seconds(r#"{"error":"IP cooldown active","retryAfter":28}"#),
+            Some(28)
+        );
+    }
+
+    #[test]
+    fn rate_limit_body_parses_cooldown_ms_shape() {
+        assert_eq!(
+            parse_retry_after_seconds(r#"{"cooldownMs":60000}"#),
+            Some(60)
+        );
+    }
+
+    #[test]
+    fn rate_limit_body_takes_priority_over_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, HeaderValue::from_static("120"));
+
+        assert_eq!(
+            retry_after_seconds(&headers, Some(r#"{"retryAfter":28}"#)),
+            28
+        );
     }
 }

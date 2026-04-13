@@ -27,7 +27,7 @@ pub async fn run(args: FaucetArgs) -> Result<()> {
                 output::success("Faucet request is available", None);
             } else if let Some(retry_after_seconds) = status.retry_after_seconds {
                 output::warning(&format!(
-                    "Faucet rate limit reached. Try again in {retry_after_seconds} seconds."
+                    "Faucet cooldown active. Try again in {retry_after_seconds} seconds."
                 ));
             } else {
                 output::warning(

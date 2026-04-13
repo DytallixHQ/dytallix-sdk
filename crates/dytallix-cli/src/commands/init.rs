@@ -94,7 +94,7 @@ where
     println!("  Next: send your first transaction");
     output::divider();
     println!();
-    println!("  dytallix send {} 100", short_address(&address));
+    println!("  dytallix send {} 100", address);
     println!();
     println!("  Sends 100 DRT to any address.");
     println!("  Gas paid in DGT automatically.");
@@ -105,8 +105,9 @@ where
     println!("  Next: deploy your first contract");
     output::divider();
     println!();
-    println!("  dytallix contract deploy ./my_contract.wasm");
+    println!("  dytallix contract deploy <path-to-your-contract.wasm>");
     println!();
+    println!("  Build a contract first, then run the deploy command.");
     println!("  Gas paid in DGT automatically.");
     println!("  Fee breakdown shown before confirmation.");
     println!("  See docs/getting-started.md for a");

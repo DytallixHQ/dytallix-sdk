@@ -119,6 +119,48 @@ fn configured_network_endpoint(config: &CliConfig) -> Result<String> {
     Ok(network_endpoint(config.network)?.to_owned())
 }
 
+pub(crate) fn public_website_endpoint(endpoint: &str) -> bool {
+    matches!(
+        endpoint.trim_end_matches('/'),
+        TESTNET_ENDPOINT | "https://www.dytallix.com"
+    )
+}
+
+pub(crate) async fn ensure_public_gateway_write_allowed(
+    feature: &str,
+    feature_state_key: &str,
+    public_read_hint: &str,
+) -> Result<()> {
+    let config = load_config()?;
+    let endpoint = configured_network_endpoint(&config)?;
+    if public_website_endpoint(&endpoint) {
+        let client = DytallixClient::new(&endpoint)
+            .await
+            .map_err(humanize_sdk_error)?;
+        let feature_state = client
+            .public_feature_state(feature_state_key)
+            .await
+            .map_err(humanize_sdk_error)?;
+        if public_write_state_disallows_gateway(feature_state.as_deref()) {
+            return Err(anyhow!(public_gateway_write_unavailable_message(
+                feature,
+                public_read_hint,
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn public_write_state_disallows_gateway(feature_state: Option<&str>) -> bool {
+    matches!(feature_state, None | Some("hidden" | "disabled" | "operator-preview"))
+}
+
+fn public_gateway_write_unavailable_message(feature: &str, public_read_hint: &str) -> String {
+    format!(
+        "Public {feature} writes are disabled on the default public website gateway while this protocol path is still alpha-incomplete. Use `{public_read_hint}` for read-only checks, inspect `/api/capabilities` on a compatible node for the active contract, or point the CLI at a direct node or local endpoint with `dytallix config set endpoint http://localhost:3030` or `DYTALLIX_ENDPOINT`."
+    )
+}
+
 fn normalize_endpoint_override(raw: &str) -> Result<String> {
     let endpoint = raw.trim().trim_end_matches('/');
     if endpoint.is_empty() {
@@ -278,7 +320,13 @@ pub(crate) async fn raw_get_json(path: &str) -> Result<Value> {
 }
 
 pub(crate) async fn raw_get_json_at(endpoint: &str, path: &str) -> Result<Value> {
-    let effective_path = public_gateway_read_path(endpoint, path);
+    let client = DytallixClient::new(endpoint)
+        .await
+        .map_err(humanize_sdk_error)?;
+    let effective_path = client
+        .resolve_read_path(path)
+        .await
+        .map_err(humanize_sdk_error)?;
     let url = format!("{endpoint}{effective_path}");
     let response = reqwest::get(&url)
         .await
@@ -338,10 +386,7 @@ fn public_gateway_contract_write_hint(
     status: reqwest::StatusCode,
 ) -> Option<String> {
     let endpoint = endpoint.trim_end_matches('/');
-    let is_public_website = matches!(
-        endpoint,
-        "https://dytallix.com" | "https://www.dytallix.com"
-    );
+    let is_public_website = public_website_endpoint(endpoint);
     let is_contract_write = matches!(path, "/contracts/deploy" | "/contracts/call");
     let is_gateway_rejection = matches!(
         status,
@@ -366,10 +411,7 @@ fn public_gateway_contract_read_hint(
     status: reqwest::StatusCode,
 ) -> Option<String> {
     let endpoint = endpoint.trim_end_matches('/');
-    let is_public_website = matches!(
-        endpoint,
-        "https://dytallix.com" | "https://www.dytallix.com"
-    );
+    let is_public_website = public_website_endpoint(endpoint);
     let is_contract_read = path.starts_with("/api/contracts/");
     let is_gateway_rejection = matches!(
         status,
@@ -385,27 +427,6 @@ fn public_gateway_contract_read_hint(
         ))
     } else {
         None
-    }
-}
-
-fn public_gateway_read_path(endpoint: &str, path: &str) -> String {
-    let endpoint = endpoint.trim_end_matches('/');
-    let is_public_website = matches!(
-        endpoint,
-        "https://dytallix.com" | "https://www.dytallix.com"
-    );
-    let already_api = path.starts_with("/api/");
-    let is_blockchain_root_read = matches!(path, "/status" | "/blocks" | "/transactions")
-        || path.starts_with("/account/")
-        || path.starts_with("/balance/")
-        || path.starts_with("/block/")
-        || path.starts_with("/tx/")
-        || path.starts_with("/transactions/");
-
-    if is_public_website && !already_api && is_blockchain_root_read {
-        format!("/api/blockchain{path}")
-    } else {
-        path.to_owned()
     }
 }
 
@@ -531,7 +552,9 @@ pub(crate) fn humanize_sdk_error(error: SdkError) -> anyhow::Error {
 		),
 			SdkError::FaucetRateLimited {
 				retry_after_seconds,
-			} => anyhow!("Faucet rate limit reached. Try again in {retry_after_seconds} seconds."),
+            } => anyhow!(
+                "Faucet cooldown active. Try again in {retry_after_seconds} seconds. The keystore and wallet are still valid if initialization already created them."
+            ),
 			SdkError::FaucetUnavailable { endpoint, reason }
             if endpoint.contains("dytallix.com/api/faucet")
                 && looks_like_gateway_html(&reason)
@@ -642,8 +665,9 @@ mod tests {
 
     use super::{
         faucet_balance_timeout, faucet_endpoint, humanize_sdk_error, keystore_not_found_message,
-        network_endpoint, normalize_endpoint_override, NetworkProfile, LOCAL_ENDPOINT,
-        TESTNET_ENDPOINT, TESTNET_FAUCET,
+        network_endpoint, normalize_endpoint_override, public_gateway_write_unavailable_message,
+        public_website_endpoint, public_write_state_disallows_gateway, NetworkProfile,
+        LOCAL_ENDPOINT, TESTNET_ENDPOINT, TESTNET_FAUCET,
     };
     use dytallix_core::address::DAddr;
     use dytallix_core::keypair::DytallixKeypair;
@@ -700,5 +724,28 @@ mod tests {
             "https://rpc.example.test"
         );
         assert!(normalize_endpoint_override("rpc.example.test").is_err());
+    }
+
+    #[test]
+    fn public_website_endpoint_detection_matches_gateway_hosts() {
+        assert!(public_website_endpoint(TESTNET_ENDPOINT));
+        assert!(public_website_endpoint("https://www.dytallix.com/"));
+        assert!(!public_website_endpoint(LOCAL_ENDPOINT));
+    }
+
+    #[test]
+    fn public_gateway_write_guard_is_descriptive() {
+        let error = public_gateway_write_unavailable_message("staking", "dytallix stake status");
+        assert!(error.contains("Public staking writes are disabled"));
+        assert!(error.contains("dytallix stake status"));
+        assert!(error.contains("/api/capabilities"));
+    }
+
+    #[test]
+    fn hidden_and_unknown_feature_states_block_public_writes() {
+        assert!(public_write_state_disallows_gateway(Some("hidden")));
+        assert!(public_write_state_disallows_gateway(Some("operator-preview")));
+        assert!(public_write_state_disallows_gateway(None));
+        assert!(!public_write_state_disallows_gateway(Some("supported-alpha")));
     }
 }

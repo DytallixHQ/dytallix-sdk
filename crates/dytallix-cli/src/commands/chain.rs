@@ -3,6 +3,7 @@
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
 
+use dytallix_sdk::client::CapabilitiesSource;
 use dytallix_sdk::BlockId;
 
 use crate::commands::{configured_client, humanize_sdk_error, raw_get_json};
@@ -28,6 +29,12 @@ pub enum ChainCommand {
     },
     /// Show the current epoch and slot.
     Epoch,
+    /// Show the machine-readable chain capabilities contract.
+    Capabilities {
+        /// Fail if the capabilities document cannot be fetched from a live node.
+        #[arg(long)]
+        require_live: bool,
+    },
     /// Show chain parameters.
     Params,
 }
@@ -38,6 +45,7 @@ pub async fn run(args: ChainArgs) -> Result<()> {
         ChainCommand::Status => show_status().await,
         ChainCommand::Block { id } => show_block(&id).await,
         ChainCommand::Epoch => show_epoch().await,
+        ChainCommand::Capabilities { require_live } => show_capabilities(require_live).await,
         ChainCommand::Params => show_params().await,
     }
 }
@@ -89,11 +97,25 @@ async fn show_epoch() -> Result<()> {
     Ok(())
 }
 
+async fn show_capabilities(require_live: bool) -> Result<()> {
+    let client = configured_client().await?;
+    let (capabilities, source) = client
+        .get_capabilities_with_source()
+        .await
+        .map_err(humanize_sdk_error)?;
+    if require_live && source != CapabilitiesSource::LiveNode {
+        return Err(anyhow!(
+            "Live capabilities endpoint is unavailable at the current node. The SDK fell back to its embedded manifest instead. Remove `--require-live`, or point the CLI at a compatible node that serves /api/capabilities."
+        ));
+    }
+    output::section("Chain capabilities");
+    println!("Source: {}", source.as_str());
+    println!("{}", serde_json::to_string_pretty(&capabilities)?);
+    Ok(())
+}
+
 async fn show_params() -> Result<()> {
-    let status = match raw_get_json("/api/blockchain/status").await {
-        Ok(status) => status,
-        Err(_) => raw_get_json("/status").await?,
-    };
+    let status = raw_get_json("/status").await?;
     let params = serde_json::json!({
         "chain_id": status.get("chain_id").cloned().unwrap_or(serde_json::Value::Null),
         "gas": status.get("gas").cloned().unwrap_or(serde_json::Value::Null),
