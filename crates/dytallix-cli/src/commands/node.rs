@@ -46,7 +46,9 @@ pub async fn run(args: NodeArgs) -> Result<()> {
 
 fn run_script(name: &str) -> Result<()> {
     let script = find_upwards(name).ok_or_else(|| {
-        anyhow!("Could not find `{name}` from the current directory. Run the command from the project root.")
+        anyhow!(
+            "Could not find `{name}` or `scripts/{name}` from the current directory. Run from the dytallix-sdk repo root or create the helper scripts."
+        )
     })?;
     let status = std::process::Command::new(&script).status()?;
     if status.success() {
@@ -90,10 +92,12 @@ fn logs() -> Result<()> {
 
 fn find_upwards(name: &str) -> Option<PathBuf> {
     let mut current = std::env::current_dir().ok()?;
-    for _ in 0..5 {
-        let candidate = current.join(name);
-        if candidate.exists() {
-            return Some(candidate);
+    for _ in 0..6 {
+        let candidates = [current.join(name), current.join("scripts").join(name)];
+        for candidate in candidates {
+            if candidate.exists() {
+                return Some(candidate);
+            }
         }
         if !current.pop() {
             break;

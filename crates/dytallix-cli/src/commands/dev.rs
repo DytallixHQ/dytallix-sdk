@@ -51,7 +51,7 @@ pub enum DevCommand {
 pub async fn run(args: DevArgs) -> Result<()> {
     match args.command {
         DevCommand::FaucetServer => faucet_server(),
-        DevCommand::Explorer => open_url("https://explorer.dytallix.com"),
+        DevCommand::Explorer => open_url("https://dytallix.com/build/blockchain"),
         DevCommand::Docs => open_url("https://dytallix.com/docs"),
         DevCommand::Discord => open_url("https://discord.gg/eyVvu5kmPG"),
         DevCommand::Github => open_url("https://github.com/DytallixHQ"),
