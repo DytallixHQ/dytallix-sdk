@@ -93,12 +93,10 @@ dytallix wallet info
 dytallix balance
 ```
 
-When you use the default public endpoint at `https://dytallix.com`, the
-website gateway exposes blockchain JSON under `/api/blockchain/...`. The CLI
-handles that prefix for you, but manual checks should use
-`/api/blockchain/balance/<daddr>`, `/api/blockchain/account/<daddr>`,
-`/api/blockchain/status`, and `/api/blockchain/submit` rather than the bare
-website routes.
+When you use the default public endpoint at `https://dytallix.com`, manual
+checks can use root routes such as `/status`, `/balance/<daddr>`,
+`/account/<daddr>`, and `/submit`. Compatibility aliases are also available on
+`/api/status` and `/api/blockchain/...`.
 
 Check faucet eligibility:
 
@@ -118,12 +116,17 @@ Prepare a first contract deployment:
 dytallix contract deploy ./my_contract.wasm
 ```
 
-Contract deploy uses `POST /contracts/deploy` on the active endpoint. If the
-default public gateway returns `405 Method Not Allowed`, point the CLI at a
-direct node or local node first:
+Contract deploy uses `POST /contracts/deploy` on the active endpoint:
 
 ```bash
 dytallix config set endpoint http://localhost:3030
+```
+
+To run a local node from this repository checkout:
+
+```bash
+./start-local.sh
+dytallix config network local
 ```
 
 After deploy, verify the indexed contract metadata with:

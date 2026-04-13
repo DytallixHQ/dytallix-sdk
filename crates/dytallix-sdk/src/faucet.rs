@@ -16,9 +16,14 @@ pub struct FaucetClient {
 impl FaucetClient {
     /// Creates a faucet client for the provided endpoint.
     pub fn new(endpoint: &str) -> Self {
+        let http = reqwest::Client::builder()
+            .user_agent(format!("dytallix-sdk/{}", env!("CARGO_PKG_VERSION")))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
         Self {
             endpoint: endpoint.trim_end_matches('/').to_owned(),
-            http: reqwest::Client::new(),
+            http,
         }
     }
 
@@ -99,10 +104,15 @@ impl FaucetClient {
                 .json()
                 .await
                 .map_err(|err| SdkError::Serialization(err.to_string()))?;
+            let retry_after_seconds = status.retry_after_seconds.or_else(|| {
+                status
+                    .time_until_next
+                    .map(|minutes| minutes.saturating_mul(60))
+            });
 
             Ok(FaucetStatus {
                 can_request: status.can_request,
-                retry_after_seconds: status.time_until_next.map(|minutes| minutes * 60),
+                retry_after_seconds,
             })
         } else if response.status().as_u16() == 429 {
             let retry_after_seconds = retry_after_seconds(response.headers());
@@ -233,8 +243,12 @@ struct FaucetLimits {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FaucetCheckResponse {
+    #[serde(default, alias = "allowed")]
     can_request: bool,
+    #[serde(default)]
     time_until_next: Option<u64>,
+    #[serde(default, alias = "retry_after_seconds")]
+    retry_after_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -263,4 +277,26 @@ fn retry_after_seconds(headers: &reqwest::header::HeaderMap) -> u64 {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(60)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FaucetCheckResponse;
+
+    #[test]
+    fn faucet_check_parses_legacy_allowed_shape() {
+        let parsed: FaucetCheckResponse =
+            serde_json::from_str(r#"{"address":"dytallix1demo","allowed":true}"#).unwrap();
+        assert!(parsed.can_request);
+        assert!(parsed.time_until_next.is_none());
+        assert!(parsed.retry_after_seconds.is_none());
+    }
+
+    #[test]
+    fn faucet_check_parses_retry_after_seconds_shape() {
+        let parsed: FaucetCheckResponse =
+            serde_json::from_str(r#"{"canRequest":false,"retryAfterSeconds":120}"#).unwrap();
+        assert!(!parsed.can_request);
+        assert_eq!(parsed.retry_after_seconds, Some(120));
+    }
 }

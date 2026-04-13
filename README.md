@@ -103,12 +103,10 @@ dytallix balance
 dytallix faucet status
 ```
 
-The default public testnet endpoint serves blockchain JSON under
-`/api/blockchain/...` on `https://dytallix.com`. The SDK and CLI handle that
-gateway prefix automatically; if you are probing the public endpoint manually,
-use `/api/blockchain/balance/...`, `/api/blockchain/account/...`,
-`/api/blockchain/status`, and `/api/blockchain/submit` instead of the bare
-website paths.
+The default public testnet endpoint is `https://dytallix.com`. Public reads are
+available on root routes such as `/status`, `/account/<daddr>`,
+`/balance/<daddr>`, and `/submit`, with compatibility aliases on `/api/status`
+and `/api/blockchain/...`.
 
 After the wallet is funded, common next steps are:
 
@@ -117,11 +115,11 @@ dytallix send <daddr> 100
 dytallix contract deploy ./my_contract.wasm
 ```
 
-The default testnet profile supports the funded wallet flow and transaction
-submission today. Contract deploy requires an endpoint that accepts
-`POST /contracts/deploy`; if the public gateway returns `405 Method Not Allowed`,
-point the CLI at a direct node or local node with `DYTALLIX_ENDPOINT` or
-`dytallix config set endpoint ...`.
+The default testnet profile supports the funded wallet flow, transaction
+submission, and contract deployment on `POST /contracts/deploy`.
+
+For local development or direct-node testing, point the CLI at a custom endpoint
+with `DYTALLIX_ENDPOINT` or `dytallix config set endpoint ...`.
 
 See [Getting started](docs/getting-started.md) and the
 [CLI reference](docs/cli-reference.md) for the full flow.
