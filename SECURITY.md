@@ -7,8 +7,12 @@ Do not open a public GitHub issue for security vulnerabilities.
 
 ## Reporting a Vulnerability
 
-Report security issues by sending a direct message to the maintainer on
-[Discord](https://discord.gg/eyVvu5kmPG).
+Report security issues privately through GitHub Security Advisories or by email
+to [hello@dytallix.com](mailto:hello@dytallix.com).
+
+If you use GitHub, open a private advisory draft from the repository's
+Security tab. Use email when you need to share details before an advisory is
+opened.
 
 Include:
 
@@ -18,7 +22,7 @@ Include:
 - Your severity and exploitability assessment
 - Whether you want public credit when the issue is disclosed
 
-You should receive an initial response within 24 hours.
+We aim to acknowledge receipt within 3 business days.
 
 ## What Happens Next
 
@@ -61,3 +65,5 @@ English.
 
 We follow responsible disclosure. Please allow a reasonable window to develop
 and ship a fix before public disclosure. We will work with you on timing.
+
+Do not use Discord or public issues for vulnerability reporting.

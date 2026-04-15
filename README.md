@@ -119,6 +119,16 @@ point the CLI at a direct node or local node with `DYTALLIX_ENDPOINT` or
 See [Getting started](docs/getting-started.md) and the
 [CLI reference](docs/cli-reference.md) for the full flow.
 
+## Repo Boundaries
+
+This repository ships the Rust SDK, core cryptography crate, and the
+`dytallix` CLI.
+
+It does include the client code that talks to the live faucet endpoint, but it
+does not contain the faucet backend implementation. The live faucet backend
+source is published separately in
+[dytallix-faucet](https://github.com/DytallixHQ/dytallix-faucet).
+
 ## Documentation Map
 
 - [Docs hub](docs/README.md) - overview of every repo documentation page
@@ -129,56 +139,13 @@ See [Getting started](docs/getting-started.md) and the
 - [FAQ](docs/faq.md) - operational and product questions
 - [Examples](examples/README.md) - runnable examples and prerequisites
 
-## Download
-
-- GitHub Releases: https://github.com/DytallixHQ/dytallix-sdk/releases
-- Build from source: `cargo build --release --bin dytallix`
-- Install from GitHub: `cargo install --git https://github.com/DytallixHQ/dytallix-sdk.git dytallix-cli --bin dytallix`
-
-Release tags matching `v*` build downloadable CLI archives for Linux, macOS
-(Intel and Apple Silicon), and Windows through GitHub Actions.
-
-## First Keypair
-
-The default `dytallix-sdk` crate now supports the shortest path to a real
-post-quantum identity:
-
-```rust
-use dytallix_sdk::{DAddr, DytallixKeypair};
-
-fn main() {
-    let keypair = DytallixKeypair::generate();
-    let addr = DAddr::from_public_key(keypair.public_key()).unwrap();
-    println!("{addr}");
-}
-```
-
-Add it to a project with:
-
-```bash
-cargo add dytallix-sdk
-```
-
-For network client and faucet support, enable the `network` feature:
-
-```bash
-cargo add dytallix-sdk --features network
-```
-
-Repository examples:
-
-```bash
-cargo run -p dytallix-sdk --example first-keypair
-cargo run -p dytallix-sdk --features network --example first-transaction
-```
-
 ## DytallixHQ Repositories
 
 - [dytallix-sdk](https://github.com/DytallixHQ/dytallix-sdk) - this repository
 - [dytallix-contracts](https://github.com/DytallixHQ/dytallix-contracts) - protocol contracts
 - [dytallix-docs](https://github.com/DytallixHQ/dytallix-docs) - broader documentation
-- [dytallix-explorer](https://github.com/DytallixHQ/dytallix-explorer) - public explorer service repository
-- [dytallix-faucet](https://github.com/DytallixHQ/dytallix-faucet) - public faucet service repository
+- [dytallix-explorer](https://github.com/DytallixHQ/dytallix-explorer) - explorer surface documentation repo
+- [dytallix-faucet](https://github.com/DytallixHQ/dytallix-faucet) - public faucet backend source
 
 ## External Links
 
