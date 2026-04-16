@@ -324,7 +324,7 @@ pub enum Message {
     },
     /// An arbitrary data payload anchored on-chain.
     Data { from: String, data: String },
-    /// A signed WASM contract deployment.
+    /// A WASM contract deployment message.
     ContractDeploy {
         from: String,
         code: String,
@@ -332,7 +332,7 @@ pub enum Message {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         initial_state: Option<String>,
     },
-    /// A signed contract call.
+    /// A contract call message.
     ContractCall {
         from: String,
         address: String,
@@ -350,6 +350,11 @@ impl Token {
             Token::DRT => "udrt",
         }
     }
+}
+
+/// Returns the default compute and bandwidth gas limits for the provided messages.
+pub fn estimate_default_gas_limits(messages: &[Message]) -> (u64, u64) {
+    estimate_gas_components(messages)
 }
 
 fn estimate_gas_components(messages: &[Message]) -> (u64, u64) {
