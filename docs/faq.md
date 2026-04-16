@@ -2,6 +2,8 @@
 
 [Docs hub](README.md) | [Getting started](getting-started.md) | [CLI reference](cli-reference.md)
 
+Keypair, faucet, transfer, and basic contract lifecycle are available for experimentation on the public testnet. Staking, governance, and some advanced or operator paths are not yet production-complete.
+
 ## How do I install the SDK if it is not on crates.io yet?
 
 Use the Git repository directly:
@@ -67,6 +69,33 @@ dytallix config network local
 The active profile controls which node and faucet endpoints the CLI uses. The
 `mainnet` profile remains reserved in config files, but the public CLI does not
 offer a selectable mainnet endpoint.
+
+## What are the public faucet limits?
+
+The canonical public testnet faucet currently grants `10 DGT` and `100 DRT`
+per successful request.
+
+The canonical limiter is:
+
+- `60` second cooldown between successful requests
+- `20` requests per hour
+
+When the faucet is cooling down, the CLI should surface a retry window in
+seconds instead of treating the service as unreachable.
+
+## Are staking and governance writes public-ready?
+
+No. Public staking and governance writes are currently disabled on the default
+website gateway.
+
+You can still use:
+
+- `dytallix stake status`
+- `dytallix governance proposals`
+- `dytallix governance status <id>`
+
+For experimental write testing, point the CLI at a local node or direct node
+endpoint.
 
 ## Where should I ask for help or report issues?
 

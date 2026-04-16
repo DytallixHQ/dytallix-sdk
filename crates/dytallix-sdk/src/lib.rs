@@ -4,6 +4,10 @@
 //! The SDK models the canonical two-token system used by the Dytallix chain:
 //! DGT for governance and delegation, and DRT for rewards. The current public
 //! node charges transaction fees in DGT micro-units.
+//!
+//! Keypair, faucet, transfer, and basic contract lifecycle are available for
+//! experimentation on the public testnet. Staking, governance, and some
+//! advanced or operator paths are not yet production-complete.
 
 #[cfg(feature = "network")]
 pub mod client;

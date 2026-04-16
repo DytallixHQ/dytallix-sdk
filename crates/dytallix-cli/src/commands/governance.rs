@@ -7,8 +7,8 @@ use dytallix_sdk::transaction::TransactionBuilder;
 use dytallix_sdk::Token;
 
 use crate::commands::{
-    active_entry, active_keypair, configured_client, humanize_sdk_error, load_keystore,
-    raw_get_json,
+    active_entry, active_keypair, configured_client, ensure_public_gateway_write_allowed,
+    humanize_sdk_error, load_keystore, raw_get_json,
 };
 use crate::output;
 
@@ -25,11 +25,11 @@ pub struct GovernanceArgs {
 pub enum GovernanceCommand {
     /// List governance proposals.
     Proposals,
-    /// Vote on a governance proposal.
+    /// Vote on a governance proposal on a local or direct node endpoint.
     Vote { id: u64, choice: VoteChoice },
-    /// Submit a minimal governance proposal transaction.
+    /// Submit a minimal governance proposal transaction on a local or direct node endpoint.
     Propose,
-    /// Show a governance proposal status.
+    /// Show a governance proposal status from the public proposals list.
     Status { id: u64 },
 }
 
@@ -62,6 +62,12 @@ async fn proposals() -> Result<()> {
 }
 
 async fn vote(id: u64, choice: VoteChoice) -> Result<()> {
+    ensure_public_gateway_write_allowed(
+        "governance",
+        "governanceWrites",
+        "dytallix governance proposals",
+    )
+    .await?;
     let keystore = load_keystore()?;
     let sender = active_entry(&keystore)?.address.clone();
     let keypair = active_keypair(&keystore)?;
@@ -95,6 +101,12 @@ async fn vote(id: u64, choice: VoteChoice) -> Result<()> {
 }
 
 async fn propose() -> Result<()> {
+    ensure_public_gateway_write_allowed(
+        "governance",
+        "governanceWrites",
+        "dytallix governance proposals",
+    )
+    .await?;
     let keystore = load_keystore()?;
     let sender = active_entry(&keystore)?.address.clone();
     let keypair = active_keypair(&keystore)?;

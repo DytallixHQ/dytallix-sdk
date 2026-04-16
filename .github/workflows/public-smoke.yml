@@ -9,6 +9,13 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  faucet-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify public faucet policy contract
+        run: bash scripts/public_smoke.sh faucet-policy
+
   first-keypair:
     runs-on: ubuntu-latest
     steps:
@@ -19,6 +26,7 @@ jobs:
         run: bash scripts/public_smoke.sh first-keypair
 
   first-transaction:
+    needs: faucet-policy
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

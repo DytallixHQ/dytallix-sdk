@@ -24,10 +24,10 @@ rustup target add wasm32-unknown-unknown
 cargo build --manifest-path examples/contracts/minimal_contract/Cargo.toml --target wasm32-unknown-unknown --release
 ```
 
-The minimal contract artifact builds locally as shown above. Actual deploys use
-`POST /contracts/deploy` on the active CLI endpoint; if the default public
-gateway returns `405 Method Not Allowed`, switch the CLI to a direct node or a
-local node before running `dytallix contract deploy`.
+The minimal contract artifact builds locally as shown above. Deploys use
+`POST /contracts/deploy` on the active CLI endpoint. The canonical public
+endpoint `https://dytallix.com` supports this route; use a local or direct node
+only when you explicitly want local testing.
 
 ## Related Docs
 

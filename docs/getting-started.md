@@ -2,6 +2,8 @@
 
 [Docs hub](README.md) | [Project README](../README.md) | [Examples](../examples/README.md)
 
+Keypair, faucet, transfer, and basic contract lifecycle are available for experimentation on the public testnet. Staking, governance, and some advanced or operator paths are not yet production-complete.
+
 ## Install Paths
 
 The SDK is currently consumed from Git, not crates.io.
@@ -93,11 +95,24 @@ dytallix wallet info
 dytallix balance
 ```
 
+When you use the default public endpoint at `https://dytallix.com`, manual
+checks can use root routes such as `/status`, `/balance/<daddr>`,
+`/account/<daddr>`, and `/submit`. Compatibility aliases are also available on
+`/api/status` and `/api/blockchain/...`.
+
 Check faucet eligibility:
 
 ```bash
 dytallix faucet status
 ```
+
+The canonical public faucet currently grants `10 DGT` and `100 DRT` per
+successful request, enforces a `60` second cooldown, and caps usage at `20`
+requests per hour.
+
+Public staking and governance writes are disabled on the default public website
+gateway. Use a local node or direct node endpoint for those experimental write
+paths.
 
 Send a test transfer:
 
@@ -111,12 +126,17 @@ Prepare a first contract deployment:
 dytallix contract deploy ./my_contract.wasm
 ```
 
-Contract deploy uses `POST /contracts/deploy` on the active endpoint. If the
-default public gateway returns `405 Method Not Allowed`, point the CLI at a
-direct node or local node first:
+Contract deploy uses `POST /contracts/deploy` on the active endpoint:
 
 ```bash
 dytallix config set endpoint http://localhost:3030
+```
+
+To run a local node from this repository checkout:
+
+```bash
+./start-local.sh
+dytallix config network local
 ```
 
 After deploy, verify the indexed contract metadata with:

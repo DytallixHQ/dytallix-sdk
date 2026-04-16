@@ -9,3 +9,5 @@ Cargo.lock
 ~/.dytallix/
 .DS_Store
 dist/
+logs/
+*.pid
