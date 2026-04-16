@@ -106,10 +106,31 @@ dytallix contract deploy <path-to-your-contract.wasm>
 See [Getting started](docs/getting-started.md) and the
 [CLI reference](docs/cli-reference.md) for the full flow.
 
-## Related Repositories
+## Repo Boundaries
+
+This repository ships the Rust SDK, core cryptography crate, and the
+`dytallix` CLI.
+
+It does include the client code that talks to the live faucet endpoint, but it
+does not contain the faucet backend implementation.
+
+## Documentation Map
+
+- [Docs hub](docs/README.md) - overview of every repo documentation page
+- [Getting started](docs/getting-started.md) - install, first keypair, first CLI session
+- [Core concepts](docs/core-concepts.md) - tokens, addresses, gas, keystore, network profiles
+- [SDK reference](docs/sdk-reference.md) - crate surface and common Rust workflows
+- [CLI reference](docs/cli-reference.md) - command map and examples
+- [FAQ](docs/faq.md) - operational and product questions
+- [Examples](examples/README.md) - runnable examples and prerequisites
+
+## DytallixHQ Repositories
 
 - [dytallix-sdk](https://github.com/DytallixHQ/dytallix-sdk) - this repository
 - [dytallix-node](https://github.com/DytallixHQ/dytallix-node) - public node and runtime source
+- [dytallix-contracts](https://github.com/DytallixHQ/dytallix-contracts) - protocol contracts
+- [dytallix-docs](https://github.com/DytallixHQ/dytallix-docs) - broader documentation
+- [dytallix-explorer](https://github.com/DytallixHQ/dytallix-explorer) - explorer surface documentation repo
 - [dytallix-faucet](https://github.com/DytallixHQ/dytallix-faucet) - docs-only faucet surface documentation, not deployed faucet backend source
 - [DytallixHQ](https://github.com/DytallixHQ)
 
