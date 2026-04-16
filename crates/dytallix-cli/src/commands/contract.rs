@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
-use dytallix_sdk::transaction::{Message, Transaction};
+use dytallix_sdk::transaction::{estimate_default_gas_limits, Message, Transaction};
 use serde_json::{json, Value};
 
 use crate::commands::{
@@ -76,17 +76,13 @@ pub async fn run(args: ContractArgs) -> Result<()> {
 async fn deploy(wasm_file: PathBuf) -> Result<()> {
     let wasm = validated_wasm_bytes(&wasm_file)?;
     let signed = sign_contract_transaction(Message::ContractDeploy {
-        from: active_sender()?.to_string(),
+        from: String::new(),
         code: bytes_to_hex(&wasm),
         gas_limit: CONTRACT_DEPLOY_GAS_LIMIT,
         initial_state: None,
     })
     .await?;
-    let value = raw_post_json(
-        "/contracts/deploy",
-        &json!({ "signed_tx": signed }),
-    )
-    .await?;
+    let value = raw_post_json("/contracts/deploy", &json!({ "signed_tx": signed })).await?;
     let tx_hash = value
         .get("tx_hash")
         .and_then(|raw| raw.as_str())
@@ -148,19 +144,16 @@ async fn deploy(wasm_file: PathBuf) -> Result<()> {
 
 async fn call(address: String, method: String, args: Vec<String>) -> Result<()> {
     let contract = validate_contract_address(&address)?;
+    let method = method.trim();
     let signed = sign_contract_transaction(Message::ContractCall {
-        from: active_sender()?.to_string(),
+        from: String::new(),
         address: contract.clone(),
-        method: method.clone(),
-        args: (!args.is_empty()).then(|| encode_contract_args(&args)),
+        method: method.to_owned(),
+        args: Some(encode_contract_args(&args)),
         gas_limit: CONTRACT_CALL_GAS_LIMIT,
     })
     .await?;
-    let value = raw_post_json(
-        "/contracts/call",
-        &json!({ "signed_tx": signed }),
-    )
-    .await?;
+    let value = raw_post_json("/contracts/call", &json!({ "signed_tx": signed })).await?;
     let tx_hash = value
         .get("tx_hash")
         .and_then(|raw| raw.as_str())
@@ -268,38 +261,39 @@ fn print_canonical_contract_verification(address: Option<&str>) {
     }
 }
 
-fn active_sender() -> Result<dytallix_core::address::DAddr> {
-    let keystore = load_keystore()?;
-    Ok(active_entry(&keystore)?.address.clone())
-}
-
 async fn sign_contract_transaction(
-    message: Message,
+    mut message: Message,
 ) -> Result<dytallix_sdk::transaction::SignedTransaction> {
     let keystore = load_keystore()?;
     let active = active_entry(&keystore)?;
     let keypair = active_keypair(&keystore)?;
+
+    match &mut message {
+        Message::ContractDeploy { from, .. } | Message::ContractCall { from, .. } => {
+            *from = active.address.to_string();
+        }
+        _ => return Err(anyhow!("unsupported contract message type")),
+    }
+
     let client = configured_client().await?;
     let account = client
         .get_account(&active.address)
         .await
         .map_err(humanize_sdk_error)?;
-
-    let gas_limit = match &message {
-        Message::ContractDeploy { gas_limit, .. } | Message::ContractCall { gas_limit, .. } => {
-            *gas_limit
-        }
-        _ => return Err(anyhow!("unsupported contract message type")),
-    };
+    let chain_status = client
+        .get_chain_status()
+        .await
+        .map_err(humanize_sdk_error)?;
+    let (c_gas_limit, b_gas_limit) = estimate_default_gas_limits(std::slice::from_ref(&message));
 
     let tx = Transaction {
-        chain_id: "dyt-local-1".to_string(),
+        chain_id: chain_status.finalized_checkpoint,
         nonce: account.nonce,
         msgs: vec![message],
         fee: 0,
         memo: String::new(),
-        c_gas_limit: gas_limit,
-        b_gas_limit: 0,
+        c_gas_limit,
+        b_gas_limit,
     };
     let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
     let required_fee_micro = fee.total_cost_drt;
@@ -472,7 +466,8 @@ mod tests {
 
     use super::{
         encode_contract_args, validate_contract_address, wait_for_deploy_confirmation,
-        wait_for_deploy_convergence, DeployConfirmationServices, DeployConfirmationVia,
+        wait_for_deploy_convergence, wait_for_transaction_confirmation, DeployConfirmationServices,
+        DeployConfirmationVia,
     };
 
     #[derive(Default)]
@@ -581,5 +576,42 @@ mod tests {
         assert!(convergence.contract_visible);
         assert!(convergence.elapsed <= Duration::from_secs(3));
         assert_eq!(services.waits.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn transaction_confirmation_returns_true_when_receipt_appears() {
+        let mut services = MockDeployConfirmationServices::default();
+        services.push_err("/tx/0xabc", "pending");
+        services.push_ok("/tx/0xabc", json!({ "tx_hash": "0xabc" }));
+
+        let confirmed = wait_for_transaction_confirmation(
+            &mut services,
+            "0xabc",
+            Duration::from_secs(2),
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap();
+
+        assert!(confirmed);
+        assert_eq!(services.waits, vec![Duration::from_millis(100)]);
+    }
+
+    #[tokio::test]
+    async fn transaction_confirmation_returns_false_on_timeout() {
+        let mut services = MockDeployConfirmationServices::default();
+        services.push_err("/tx/0xdef", "pending");
+
+        let confirmed = wait_for_transaction_confirmation(
+            &mut services,
+            "0xdef",
+            Duration::from_millis(0),
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap();
+
+        assert!(!confirmed);
+        assert!(services.waits.is_empty());
     }
 }
