@@ -1,7 +1,10 @@
 //! Send command implementation.
 
+use std::time::Duration;
+
 use anyhow::{anyhow, Result};
 use clap::{Args, ValueEnum};
+use tokio::time::sleep;
 
 use dytallix_sdk::transaction::TransactionBuilder;
 use dytallix_sdk::Token;
@@ -13,6 +16,8 @@ use crate::commands::{
 use crate::output;
 
 const MICROS_PER_TOKEN: u128 = 1_000_000;
+const SEND_CONFIRMATION_POLL_COUNT: usize = 15;
+const SEND_CONFIRMATION_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Arguments for the `send` command.
 #[derive(Debug, Clone, Args)]
@@ -101,8 +106,27 @@ pub async fn run(args: SendArgs) -> Result<()> {
         .submit_transaction(&signed)
         .await
         .map_err(humanize_sdk_error)?;
-    output::tx_hash(&receipt.hash);
+    let tx_hash = receipt.hash;
+    output::tx_hash(&tx_hash);
     output::success("Transaction submitted", None);
+
+    for attempt in 0..SEND_CONFIRMATION_POLL_COUNT {
+        match client.get_transaction(&tx_hash).await {
+            Ok(indexed) if !matches!(indexed.status, dytallix_sdk::TransactionStatus::Pending) => {
+                println!("Status: {:?}", indexed.status);
+                output::success("Transaction confirmed", None);
+                return Ok(());
+            }
+            _ if attempt + 1 < SEND_CONFIRMATION_POLL_COUNT => {
+                sleep(SEND_CONFIRMATION_POLL_INTERVAL).await;
+            }
+            _ => {}
+        }
+    }
+
+    output::warning(
+        "Transaction submitted but is still pending or indexing. Re-run dytallix balance in a moment or inspect the printed transaction hash.",
+    );
     Ok(())
 }
 

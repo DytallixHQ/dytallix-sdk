@@ -94,9 +94,14 @@ where
     println!("  Next: send your first transaction");
     output::divider();
     println!();
-    println!("  dytallix send {} 100", address);
+    println!("  dytallix wallet create --name recipient");
+    println!("  dytallix wallet switch recipient");
+    println!("  dytallix wallet info");
+    println!("  dytallix wallet switch default");
+    println!("  dytallix send <recipient-daddr> 100");
     println!();
-    println!("  Sends 100 DRT to any address.");
+    println!("  Create a separate recipient wallet first.");
+    println!("  Do not self-send the address from dytallix init.");
     println!("  Gas paid in DGT automatically.");
     println!("  Fee breakdown shown before confirmation.");
     println!("  Run it now to hit Milestone 2.");

@@ -114,15 +114,18 @@ These are the three developer milestones this repository is optimized for:
     ```
 
     Use a different recipient address than the one printed by `dytallix init`
-    so you do not self-send.
+    so you do not self-send. The `send` command waits for the submitted
+    transaction to leave `Pending` when the public receipt route is already
+    indexing.
 
     Continue with: [first-transaction example](examples/first-transaction.rs) · [Explorer](https://dytallix.com/build/blockchain) · [Releases](https://github.com/DytallixHQ/dytallix-sdk/releases)
 
 3. **First contract build: under 15 minutes**
 
-    Build a minimal WASM contract now. The default public gateway currently does
-    not accept `POST /contracts/deploy`, so actual deploys require a direct node
-    endpoint or a local node.
+    Build a minimal WASM contract now. The default public gateway accepts
+    `POST /contracts/deploy` and `POST /contracts/call`; use a direct node
+    endpoint or a local node only when you want local testing or custom
+    infrastructure.
 
     ```bash
     rustup target add wasm32-unknown-unknown
@@ -164,12 +167,15 @@ dytallix faucet status
 dytallix send <daddr> 100
 ```
 
-If you have a compiled contract artifact and a direct node endpoint or local
-node, you can also deploy:
+If you have a compiled contract artifact, you can also deploy on the default
+public testnet profile:
 
 ```bash
 dytallix contract deploy <path-to-your-contract.wasm>
 ```
+
+Use a direct node endpoint or local node only when you want local testing or a
+custom RPC base.
 
 See [Getting started](docs/getting-started.md) and the
 [CLI reference](docs/cli-reference.md) for the full flow.

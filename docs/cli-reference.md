@@ -57,6 +57,9 @@ This command:
 - submits a faucet request
 - waits for DGT and DRT to appear
 
+For Milestone 2, create a separate recipient wallet after `init` and send to
+that address rather than self-sending the funded default wallet.
+
 ### `wallet`
 
 Subcommands:
@@ -94,6 +97,9 @@ Current public faucet policy:
 - successful requests fund `10 DGT` and `100 DRT`
 - the public cooldown is `60` seconds
 - the public cap is `20` requests per hour
+- `send` submits the signed transaction, prints the hash, and waits for
+  `/tx/<hash>` to leave `Pending` when the public receipt route is already
+  indexing
 
 ### `stake`
 
