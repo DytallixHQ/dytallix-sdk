@@ -7,8 +7,9 @@ from the repository root.
 
 - [`first-keypair.rs`](first-keypair.rs) - generate an ML-DSA-65 keypair,
   derive a D-Addr, sign a message, and verify the signature
-- [`first-transaction.rs`](first-transaction.rs) - request faucet funds and
-  attempt a signed transfer against the configured public testnet endpoints
+- [`first-transaction.rs`](first-transaction.rs) - request faucet funds for a
+  sender wallet, transfer to a separate recipient, and wait for confirmation
+  against the configured public testnet endpoints
 - [`deploy-contract.rs`](deploy-contract.rs) - use the CLI keystore and prepare
   a first contract deployment flow
 - [`contracts/minimal_contract`](contracts/minimal_contract) - build a minimal
@@ -27,7 +28,7 @@ cargo build --manifest-path examples/contracts/minimal_contract/Cargo.toml --tar
 The minimal contract artifact builds locally as shown above. Deploys use
 `POST /contracts/deploy` on the active CLI endpoint. The canonical public
 endpoint `https://dytallix.com` supports this route; use a local or direct node
-only when you explicitly want local testing.
+only when you explicitly want local testing or custom infrastructure.
 
 ## Related Docs
 

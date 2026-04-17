@@ -117,8 +117,19 @@ paths.
 Send a test transfer:
 
 ```bash
-dytallix send <daddr> 100
+dytallix wallet create --name recipient
+dytallix wallet switch recipient
+dytallix wallet info
+dytallix wallet switch default
+dytallix send <recipient-daddr> 100
+dytallix wallet switch recipient
+dytallix balance
 ```
+
+Use a different recipient address than the one created by `dytallix init`.
+The `send` command waits for the public `/tx/<hash>` route to leave `Pending`
+when that route is already indexing. If the recipient balance still shows `0`
+immediately after confirmation, run `dytallix balance` again after a moment.
 
 Prepare a first contract deployment:
 
@@ -126,7 +137,11 @@ Prepare a first contract deployment:
 dytallix contract deploy ./my_contract.wasm
 ```
 
-Contract deploy uses `POST /contracts/deploy` on the active endpoint:
+The default testnet profile already targets `https://dytallix.com`, and the
+public gateway accepts `POST /contracts/deploy` on that endpoint.
+
+If you want to test against a direct node endpoint or a local node instead,
+override the active endpoint:
 
 ```bash
 dytallix config set endpoint http://localhost:3030

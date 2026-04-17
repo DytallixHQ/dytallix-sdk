@@ -11,19 +11,22 @@ use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let keypair = DytallixKeypair::generate();
-    let addr = dytallix_core::address::DAddr::from_public_key(keypair.public_key())?;
-    println!("Address: {addr}");
+    let sender_keypair = DytallixKeypair::generate();
+    let sender_addr = dytallix_core::address::DAddr::from_public_key(sender_keypair.public_key())?;
+    let recipient_keypair = DytallixKeypair::generate();
+    let recipient_addr = dytallix_core::address::DAddr::from_public_key(recipient_keypair.public_key())?;
+    println!("Sender: {sender_addr}");
+    println!("Recipient: {recipient_addr}");
 
     let faucet = FaucetClient::testnet();
-    let balance = faucet.fund(&addr).await?;
+    let balance = faucet.fund(&sender_addr).await?;
     println!("{balance}");
 
     let client = DytallixClient::testnet().await?;
-    let account = client.get_account(&addr).await?;
+    let account = client.get_account(&sender_addr).await?;
     let tx = TransactionBuilder::new()
-        .from(addr.clone())
-        .to(addr.clone())
+        .from(sender_addr.clone())
+        .to(recipient_addr.clone())
         .amount(1, Token::DRT)
         .nonce(account.nonce)
         .build()?;
@@ -33,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(humanize_transaction_error)?;
     println!("{fee}");
 
-    let signed = tx.sign(&keypair)?;
+    let signed = tx.sign(&sender_keypair)?;
     let receipt = client
         .submit_transaction(&signed)
         .await
@@ -41,6 +44,9 @@ async fn main() -> anyhow::Result<()> {
     println!("Transaction: {}", receipt.hash);
     let receipt = wait_for_receipt(&client, &receipt.hash).await?;
     println!("Status: {:?}", receipt.status);
+
+    let recipient_account = client.get_account(&recipient_addr).await?;
+    println!("Recipient balance: {}", recipient_account.balance);
     Ok(())
 }
 
