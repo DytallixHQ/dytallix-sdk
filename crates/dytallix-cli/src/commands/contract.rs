@@ -5,13 +5,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
-use dytallix_sdk::transaction::{estimate_default_gas_limits, Message, Transaction};
 use serde_json::{json, Value};
 
 use crate::commands::{
-    active_entry, active_keypair, bytes_to_hex, configured_client, display_path,
-    format_micro_amount, format_number, hex_to_bytes, humanize_sdk_error, load_keystore,
-    raw_get_json, raw_post_json, read_bytes,
+    active_entry, bytes_to_hex, display_path, hex_to_bytes, load_keystore, raw_get_json,
+    raw_post_json, read_bytes,
 };
 use crate::output;
 
@@ -21,7 +19,6 @@ const CALL_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(15);
 const CALL_CONFIRMATION_POLL_INTERVAL: Duration = Duration::from_millis(750);
 const CONTRACT_DEPLOY_GAS_LIMIT: u64 = 1_000_000;
 const CONTRACT_CALL_GAS_LIMIT: u64 = 1_000_000;
-const MICROS_PER_TOKEN: u128 = 1_000_000;
 
 /// Arguments for the `contract` command.
 #[derive(Debug, Clone, Args)]
@@ -75,14 +72,10 @@ pub async fn run(args: ContractArgs) -> Result<()> {
 
 async fn deploy(wasm_file: PathBuf) -> Result<()> {
     let wasm = validated_wasm_bytes(&wasm_file)?;
-    let signed = sign_contract_transaction(Message::ContractDeploy {
-        from: String::new(),
-        code: bytes_to_hex(&wasm),
-        gas_limit: CONTRACT_DEPLOY_GAS_LIMIT,
-        initial_state: None,
-    })
-    .await?;
-    let value = raw_post_json("/contracts/deploy", &json!({ "signed_tx": signed })).await?;
+    let keystore = load_keystore()?;
+    let deployer = active_entry(&keystore)?.address.to_string();
+    let payload = contract_deploy_request_payload(&wasm, &deployer);
+    let value = raw_post_json("/contracts/deploy", &payload).await?;
     let tx_hash = value
         .get("tx_hash")
         .and_then(|raw| raw.as_str())
@@ -145,15 +138,8 @@ async fn deploy(wasm_file: PathBuf) -> Result<()> {
 async fn call(address: String, method: String, args: Vec<String>) -> Result<()> {
     let contract = validate_contract_address(&address)?;
     let method = method.trim();
-    let signed = sign_contract_transaction(Message::ContractCall {
-        from: String::new(),
-        address: contract.clone(),
-        method: method.to_owned(),
-        args: Some(encode_contract_args(&args)),
-        gas_limit: CONTRACT_CALL_GAS_LIMIT,
-    })
-    .await?;
-    let value = raw_post_json("/contracts/call", &json!({ "signed_tx": signed })).await?;
+    let payload = contract_call_request_payload(&contract, method, &args);
+    let value = raw_post_json("/contracts/call", &payload).await?;
     let tx_hash = value
         .get("tx_hash")
         .and_then(|raw| raw.as_str())
@@ -261,55 +247,25 @@ fn print_canonical_contract_verification(address: Option<&str>) {
     }
 }
 
-async fn sign_contract_transaction(
-    mut message: Message,
-) -> Result<dytallix_sdk::transaction::SignedTransaction> {
-    let keystore = load_keystore()?;
-    let active = active_entry(&keystore)?;
-    let keypair = active_keypair(&keystore)?;
+fn contract_deploy_request_payload(wasm: &[u8], deployer: &str) -> Value {
+    json!({
+        "code": bytes_to_hex(wasm),
+        "deployer": deployer,
+        "gas_limit": CONTRACT_DEPLOY_GAS_LIMIT,
+    })
+}
 
-    match &mut message {
-        Message::ContractDeploy { from, .. } | Message::ContractCall { from, .. } => {
-            *from = active.address.to_string();
-        }
-        _ => return Err(anyhow!("unsupported contract message type")),
+fn contract_call_request_payload(address: &str, method: &str, args: &[String]) -> Value {
+    let mut payload = json!({
+        "address": address,
+        "method": method,
+        "gas_limit": CONTRACT_CALL_GAS_LIMIT,
+    });
+    let encoded_args = encode_contract_args(args);
+    if !encoded_args.is_empty() {
+        payload["args"] = json!(encoded_args);
     }
-
-    let client = configured_client().await?;
-    let account = client
-        .get_account(&active.address)
-        .await
-        .map_err(humanize_sdk_error)?;
-    let chain_status = client
-        .get_chain_status()
-        .await
-        .map_err(humanize_sdk_error)?;
-    let (c_gas_limit, b_gas_limit) = estimate_default_gas_limits(std::slice::from_ref(&message));
-
-    let tx = Transaction {
-        chain_id: chain_status.finalized_checkpoint,
-        nonce: account.nonce,
-        msgs: vec![message],
-        fee: 0,
-        memo: String::new(),
-        c_gas_limit,
-        b_gas_limit,
-    };
-    let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
-    let required_fee_micro = fee.total_cost_drt;
-    let available_fee_micro = account.balance.dgt.saturating_mul(MICROS_PER_TOKEN);
-    if available_fee_micro < required_fee_micro {
-        return Err(anyhow!(
-            "Insufficient DGT for gas fees. Required: {} DGT. Available: {} DGT. Run dytallix faucet to get more.",
-            format_micro_amount(required_fee_micro),
-            format_number(account.balance.dgt)
-        ));
-    }
-
-    output::fee_breakdown(&fee);
-    tx.with_fee_micro(required_fee_micro)
-        .sign(&keypair)
-        .map_err(humanize_sdk_error)
+    payload
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -465,9 +421,9 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        encode_contract_args, validate_contract_address, wait_for_deploy_confirmation,
-        wait_for_deploy_convergence, wait_for_transaction_confirmation, DeployConfirmationServices,
-        DeployConfirmationVia,
+        contract_call_request_payload, contract_deploy_request_payload, encode_contract_args,
+        validate_contract_address, wait_for_deploy_confirmation, wait_for_deploy_convergence,
+        wait_for_transaction_confirmation, DeployConfirmationServices, DeployConfirmationVia,
     };
 
     #[derive(Default)]
@@ -523,6 +479,29 @@ mod tests {
             encode_contract_args(&["hello".to_owned(), "7".to_owned()]),
             "68656c6c6f2c37"
         );
+    }
+
+    #[test]
+    fn deploy_request_payload_includes_raw_contract_fields() {
+        let payload = contract_deploy_request_payload(b"\0asm", "dyt1sender");
+
+        assert_eq!(payload["code"], "0061736d");
+        assert_eq!(payload["deployer"], "dyt1sender");
+        assert_eq!(payload["gas_limit"], 1_000_000);
+    }
+
+    #[test]
+    fn call_request_payload_includes_raw_contract_fields() {
+        let payload = contract_call_request_payload(
+            "0x9a9671441249ee2c364f9b4bc8049e61b082449a",
+            "ping",
+            &["hello".to_owned()],
+        );
+
+        assert_eq!(payload["address"], "0x9a9671441249ee2c364f9b4bc8049e61b082449a");
+        assert_eq!(payload["method"], "ping");
+        assert_eq!(payload["args"], "68656c6c6f");
+        assert_eq!(payload["gas_limit"], 1_000_000);
     }
 
     #[tokio::test]

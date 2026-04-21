@@ -176,6 +176,7 @@ Current public behavior:
 - `info <address>` reads `https://dytallix.com/api/contracts/<address>`
 - `query` reads `https://dytallix.com/api/contracts/<address>/query/<method>`
 - `events` reads `https://dytallix.com/api/contracts/<address>/events`
+- the default public website gateway accepts contract deploy and call requests
 - for a direct node endpoint or a local node, set `DYTALLIX_ENDPOINT` or run
   `dytallix config set endpoint http://localhost:3030`
 
