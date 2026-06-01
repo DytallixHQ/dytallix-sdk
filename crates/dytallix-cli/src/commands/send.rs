@@ -25,6 +25,11 @@ pub struct SendArgs {
     /// The token to send. Defaults to DRT.
     #[arg(long, default_value = "drt")]
     pub token: SendToken,
+    /// Send from a specific wallet (by name) instead of the active wallet.
+    /// Lets services and scripts sign as a chosen account without mutating the
+    /// global active wallet.
+    #[arg(long)]
+    pub from: Option<String>,
     /// The destination Dytallix address.
     pub address: String,
     /// The token amount to send.
@@ -54,8 +59,21 @@ pub async fn run(args: SendArgs) -> Result<()> {
     let destination = validate_destination_before_network(&args.address)?;
 
     let keystore = load_keystore()?;
-    let sender = active_entry(&keystore)?.address.clone();
-    let keypair = active_keypair(&keystore)?;
+    let (sender, keypair) = match &args.from {
+        Some(name) => {
+            let entry = keystore
+                .list()
+                .into_iter()
+                .find(|e| e.name == *name)
+                .ok_or_else(|| anyhow!("No wallet named '{name}' in the keystore."))?;
+            let keypair = keystore.get_keypair(name).map_err(humanize_sdk_error)?;
+            (entry.address.clone(), keypair)
+        }
+        None => (
+            active_entry(&keystore)?.address.clone(),
+            active_keypair(&keystore)?,
+        ),
+    };
     let client = configured_client().await?;
     let account = client
         .get_account(&sender)
@@ -90,13 +108,14 @@ pub async fn run(args: SendArgs) -> Result<()> {
         .map_err(|err| anyhow!(err.to_string()))?;
     let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
 
+    // Fees are paid in DRT (the reward/fee token), matching the node fee denom.
     let required_fee_micro = fee.total_cost_drt;
-    let available_fee_micro = account.balance.dgt.saturating_mul(MICROS_PER_TOKEN);
+    let available_fee_micro = account.balance.drt.saturating_mul(MICROS_PER_TOKEN);
     if available_fee_micro < required_fee_micro {
         return Err(anyhow!(
-			"Insufficient DGT for gas fees. Required: {} DGT. Available: {} DGT. Run dytallix faucet to get more.",
+			"Insufficient DRT for gas fees. Required: {} DRT. Available: {} DRT. Run dytallix faucet to get more.",
 			format_micro_amount(required_fee_micro),
-			format_number(account.balance.dgt)
+			format_number(account.balance.drt)
 		));
     }
 
