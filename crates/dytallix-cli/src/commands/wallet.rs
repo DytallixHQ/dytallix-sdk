@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
+use base64::Engine as _;
 use clap::{Args, Subcommand};
 use dytallix_core::hash::hash_public_key;
 use dytallix_core::keypair::{DytallixKeypair, KeyScheme};
@@ -90,21 +91,13 @@ fn create_wallet(name: Option<String>) -> Result<()> {
 
 fn import_wallet(key_file: PathBuf, name: Option<String>) -> Result<()> {
     let raw = read_bytes(&key_file)?;
-    let bytes = match String::from_utf8(raw.clone()) {
-        Ok(text)
-            if text
-                .trim()
-                .chars()
-                .all(|ch| ch.is_ascii_hexdigit() || ch.is_whitespace()) =>
-        {
-            hex_to_bytes(text.trim())?
-        }
-        _ => raw,
-    };
-    let keypair = DytallixKeypair::from_private_key(&bytes).map_err(|err| {
+    let decoded = decode_private_key_file(raw)?;
+    let keypair = DytallixKeypair::from_private_key(&decoded.bytes).map_err(|err| {
         anyhow!(
-            "Failed to import keypair from {}: {err}",
-            display_path(&key_file)
+            "Failed to import keypair from {}: {err}. The file was decoded as {} and produced {} bytes. Supported wallet import formats are raw, hex, or base64 ML-DSA-65 private keys (4032 bytes).",
+            display_path(&key_file),
+            decoded.format,
+            decoded.bytes.len()
         )
     })?;
 
@@ -130,6 +123,59 @@ fn import_wallet(key_file: PathBuf, name: Option<String>) -> Result<()> {
 
     output::success(&format!("Wallet imported: {name}"), None);
     Ok(())
+}
+
+struct DecodedPrivateKeyFile {
+    bytes: Vec<u8>,
+    format: &'static str,
+}
+
+fn decode_private_key_file(raw: Vec<u8>) -> Result<DecodedPrivateKeyFile> {
+    let Ok(text) = std::str::from_utf8(&raw) else {
+        return Ok(DecodedPrivateKeyFile {
+            bytes: raw,
+            format: "raw bytes",
+        });
+    };
+
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(DecodedPrivateKeyFile {
+            bytes: raw,
+            format: "raw bytes",
+        });
+    }
+
+    if trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_hexdigit() || ch.is_whitespace())
+    {
+        return Ok(DecodedPrivateKeyFile {
+            bytes: hex_to_bytes(trimmed)?,
+            format: "hex text",
+        });
+    }
+
+    let compact = trimmed
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>();
+    if compact
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '/' | '='))
+    {
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(compact.as_bytes()) {
+            return Ok(DecodedPrivateKeyFile {
+                bytes,
+                format: "base64 text",
+            });
+        }
+    }
+
+    Ok(DecodedPrivateKeyFile {
+        bytes: raw,
+        format: "raw bytes",
+    })
 }
 
 fn export_wallet(output_path: PathBuf) -> Result<()> {
@@ -209,4 +255,59 @@ fn default_wallet_name() -> String {
         .map(|duration| duration.as_secs())
         .unwrap_or(0);
     format!("wallet-{timestamp}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dytallix_sdk::keystore::Keystore;
+    use std::sync::Mutex;
+
+    static HOME_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn import_wallet_decodes_base64_private_key_text() {
+        let _guard = HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", dir.path());
+
+        let keypair = DytallixKeypair::generate();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(keypair.private_key());
+        let key_path = dir.path().join("funded-wallet.key");
+        fs::write(&key_path, encoded).unwrap();
+
+        import_wallet(key_path, Some("funded-wallet".to_owned())).unwrap();
+
+        let keystore = Keystore::open(Keystore::default_path()).unwrap();
+        let imported = keystore.get_keypair("funded-wallet").unwrap();
+        assert_eq!(imported.public_key(), keypair.public_key());
+        assert_eq!(imported.private_key(), keypair.private_key());
+
+        std::env::remove_var("HOME");
+    }
+
+    #[test]
+    fn import_wallet_reports_base64_decoded_unsupported_key_length() {
+        let _guard = HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", dir.path());
+
+        let encoded = base64::engine::general_purpose::STANDARD.encode(vec![0xffu8; 3504]);
+        let key_path = dir.path().join("incomplete-expanded.key");
+        fs::write(&key_path, encoded).unwrap();
+
+        let error = import_wallet(key_path, Some("bad-wallet".to_owned()))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("base64 text"));
+        assert!(error.contains("3504 bytes"));
+        assert!(error.contains("4032 bytes"));
+
+        std::env::remove_var("HOME");
+    }
 }
