@@ -152,7 +152,10 @@ pub(crate) async fn ensure_public_gateway_write_allowed(
 }
 
 fn public_write_state_disallows_gateway(feature_state: Option<&str>) -> bool {
-    matches!(feature_state, None | Some("hidden" | "disabled" | "operator-preview"))
+    matches!(
+        feature_state,
+        None | Some("hidden" | "disabled" | "operator-preview")
+    )
 }
 
 fn public_gateway_write_unavailable_message(feature: &str, public_read_hint: &str) -> String {
@@ -744,8 +747,12 @@ mod tests {
     #[test]
     fn hidden_and_unknown_feature_states_block_public_writes() {
         assert!(public_write_state_disallows_gateway(Some("hidden")));
-        assert!(public_write_state_disallows_gateway(Some("operator-preview")));
+        assert!(public_write_state_disallows_gateway(Some(
+            "operator-preview"
+        )));
         assert!(public_write_state_disallows_gateway(None));
-        assert!(!public_write_state_disallows_gateway(Some("supported-alpha")));
+        assert!(!public_write_state_disallows_gateway(Some(
+            "supported-alpha"
+        )));
     }
 }

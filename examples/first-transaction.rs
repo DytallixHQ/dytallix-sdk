@@ -14,7 +14,8 @@ async fn main() -> anyhow::Result<()> {
     let sender_keypair = DytallixKeypair::generate();
     let sender_addr = dytallix_core::address::DAddr::from_public_key(sender_keypair.public_key())?;
     let recipient_keypair = DytallixKeypair::generate();
-    let recipient_addr = dytallix_core::address::DAddr::from_public_key(recipient_keypair.public_key())?;
+    let recipient_addr =
+        dytallix_core::address::DAddr::from_public_key(recipient_keypair.public_key())?;
     println!("Sender: {sender_addr}");
     println!("Recipient: {recipient_addr}");
 

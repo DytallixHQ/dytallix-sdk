@@ -125,7 +125,9 @@ impl DytallixClient {
     /// Compatible nodes should serve this from `/api/capabilities`. When that
     /// endpoint is unavailable, the SDK falls back to its embedded manifest.
     pub async fn get_capabilities(&self) -> Result<serde_json::Value, SdkError> {
-        self.get_capabilities_with_source().await.map(|(document, _)| document)
+        self.get_capabilities_with_source()
+            .await
+            .map(|(document, _)| document)
     }
 
     /// Fetches the machine-readable public capabilities document together with
@@ -184,9 +186,7 @@ impl DytallixClient {
     /// Fetches the active validator set.
     pub async fn get_validators(&self) -> Result<Vec<Validator>, SdkError> {
         if self.uses_public_testnet_gateway()
-            && self
-                .route_is_direct_node_only("GET /v1/validators")
-                .await?
+            && self.route_is_direct_node_only("GET /v1/validators").await?
         {
             return Err(
                 self.legacy_public_read_unavailable("/v1/validators", "validator-set reads")
@@ -212,7 +212,10 @@ impl DytallixClient {
 
     /// Returns the advertised feature state from the runtime capabilities endpoint,
     /// or the embedded SDK manifest when the runtime endpoint is unavailable.
-    pub async fn public_feature_state(&self, feature_key: &str) -> Result<Option<String>, SdkError> {
+    pub async fn public_feature_state(
+        &self,
+        feature_key: &str,
+    ) -> Result<Option<String>, SdkError> {
         let document = self.capabilities_document().await?;
         Ok(document.features.get(feature_key).cloned())
     }
@@ -277,7 +280,9 @@ impl DytallixClient {
         Ok(self.cached_capabilities().await?.document)
     }
 
-    async fn capabilities_json_value(&self) -> Result<(serde_json::Value, CapabilitiesSource), SdkError> {
+    async fn capabilities_json_value(
+        &self,
+    ) -> Result<(serde_json::Value, CapabilitiesSource), SdkError> {
         let cached = self.cached_capabilities().await?;
         Ok((cached.json, cached.source))
     }
@@ -300,15 +305,15 @@ impl DytallixClient {
     async fn try_get_capabilities_payload(&self) -> Result<CachedCapabilities, SdkError> {
         let url = Url::parse(&format!("{}{}", self.endpoint, CAPABILITIES_ENDPOINT_PATH))
             .map_err(|err| SdkError::Network(err.to_string()))?;
-        let response = self
-            .http
-            .get(url.clone())
-            .send()
-            .await
-            .map_err(|err| SdkError::NodeUnavailable {
-                endpoint: url.to_string(),
-                reason: err.to_string(),
-            })?;
+        let response =
+            self.http
+                .get(url.clone())
+                .send()
+                .await
+                .map_err(|err| SdkError::NodeUnavailable {
+                    endpoint: url.to_string(),
+                    reason: err.to_string(),
+                })?;
 
         if response.status().is_success() {
             let json: serde_json::Value = response.json().await.map_err(serialization_error)?;
@@ -732,10 +737,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        embedded_capabilities_document, resolve_public_gateway_get_path, route_template_matches,
-        CapabilitiesSource, normalize_endpoint, public_gateway_path, transaction_submit_path,
-        BlockResponse, ChainStatusResponse, DytallixClient, LOCAL_NODE_ENDPOINT,
-        PUBLIC_TESTNET_ENDPOINT,
+        embedded_capabilities_document, normalize_endpoint, public_gateway_path,
+        resolve_public_gateway_get_path, route_template_matches, transaction_submit_path,
+        BlockResponse, CapabilitiesSource, ChainStatusResponse, DytallixClient,
+        LOCAL_NODE_ENDPOINT, PUBLIC_TESTNET_ENDPOINT,
     };
     use crate::error::SdkError;
     use dytallix_core::address::DAddr;

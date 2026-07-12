@@ -75,14 +75,22 @@ pub async fn run(args: ContractArgs) -> Result<()> {
 
 async fn deploy(wasm_file: PathBuf) -> Result<()> {
     let wasm = validated_wasm_bytes(&wasm_file)?;
-    let signed = sign_contract_transaction(Message::ContractDeploy {
-        from: String::new(),
-        code: bytes_to_hex(&wasm),
-        gas_limit: CONTRACT_DEPLOY_GAS_LIMIT,
-        initial_state: None,
-    })
+    // The live node's `POST /contracts/deploy` expects the raw contract `code`
+    // (hex) with an optional `deployer` and `gas_limit`. It does not verify a
+    // signed transaction and does not charge a DRT fee. Posting a signed
+    // `ContractDeploy` message instead makes the node reject the request with
+    // `missing code`, so send the fields the node actually reads.
+    let keystore = load_keystore()?;
+    let deployer = active_entry(&keystore)?.address.to_string();
+    let value = raw_post_json(
+        "/contracts/deploy",
+        &json!({
+            "code": bytes_to_hex(&wasm),
+            "deployer": deployer,
+            "gas_limit": CONTRACT_DEPLOY_GAS_LIMIT,
+        }),
+    )
     .await?;
-    let value = raw_post_json("/contracts/deploy", &json!({ "signed_tx": signed })).await?;
     let tx_hash = value
         .get("tx_hash")
         .and_then(|raw| raw.as_str())
@@ -297,12 +305,12 @@ async fn sign_contract_transaction(
     };
     let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
     let required_fee_micro = fee.total_cost_drt;
-    let available_fee_micro = account.balance.dgt.saturating_mul(MICROS_PER_TOKEN);
+    let available_fee_micro = account.balance.drt.saturating_mul(MICROS_PER_TOKEN);
     if available_fee_micro < required_fee_micro {
         return Err(anyhow!(
-            "Insufficient DGT for gas fees. Required: {} DGT. Available: {} DGT. Run dytallix faucet to get more.",
+            "Insufficient DRT for gas fees. Required: {} DRT. Available: {} DRT. Run dytallix faucet to get more.",
             format_micro_amount(required_fee_micro),
-            format_number(account.balance.dgt)
+            format_number(account.balance.drt)
         ));
     }
 
