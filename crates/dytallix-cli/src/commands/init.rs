@@ -58,7 +58,11 @@ where
     let deadline = Instant::now() + Duration::from_secs(45);
     let balance = loop {
         let balance = services.poll_balance(&address).await?;
-        if balance.dgt > 0 && balance.drt > 0 {
+        // DRT is the faucet-obtainable token that pays transaction gas. DGT is
+        // the governance token and is NOT dispensed by the faucet, so its
+        // balance stays 0 for a freshly-funded wallet. Confirm funding on DRT;
+        // requiring DGT here could never succeed and always timed out at 45s.
+        if balance.drt > 0 {
             break balance;
         }
         if Instant::now() >= deadline {
@@ -69,15 +73,19 @@ where
 
     let received_elapsed = overall.elapsed();
     emit(format!(
-        "✓ DGT received: {} DGT             [{:.1}s]",
-        format_number(balance.dgt),
-        received_elapsed.as_secs_f64()
-    ));
-    emit(format!(
         "✓ DRT received: {} DRT            [{:.1}s]",
         format_number(balance.drt),
         received_elapsed.as_secs_f64()
     ));
+    // The faucet does not dispense DGT, so only surface it when actually present
+    // (e.g. a pre-funded governance wallet) instead of printing "0 DGT".
+    if balance.dgt > 0 {
+        emit(format!(
+            "✓ DGT received: {} DGT             [{:.1}s]",
+            format_number(balance.dgt),
+            received_elapsed.as_secs_f64()
+        ));
+    }
     emit(String::new());
     emit("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".to_owned());
     emit("  Milestone 1 complete: funded wallet".to_owned());
@@ -102,7 +110,7 @@ where
     println!();
     println!("  Create a separate recipient wallet first.");
     println!("  Do not self-send the address from dytallix init.");
-    println!("  Gas paid in DGT automatically.");
+    println!("  Gas paid in DRT automatically.");
     println!("  Fee breakdown shown before confirmation.");
     println!("  Run it now to hit Milestone 2.");
     println!();
@@ -113,7 +121,7 @@ where
     println!("  dytallix contract deploy <path-to-your-contract.wasm>");
     println!();
     println!("  Build a contract first, then run the deploy command.");
-    println!("  Gas paid in DGT automatically.");
+    println!("  Gas paid in DRT automatically.");
     println!("  Fee breakdown shown before confirmation.");
     println!("  See docs/getting-started.md for a");
     println!("  complete walkthrough to Milestone 3.");
@@ -212,5 +220,51 @@ mod tests {
             .await
             .unwrap();
         assert!(elapsed > Duration::ZERO);
+    }
+
+    struct DrtOnlyInitServices;
+
+    impl InitServices for DrtOnlyInitServices {
+        async fn generate_keypair(&mut self) -> anyhow::Result<DytallixKeypair> {
+            Ok(DytallixKeypair::generate())
+        }
+
+        async fn save_keypair(&mut self, _keypair: &DytallixKeypair) -> anyhow::Result<PathBuf> {
+            Ok(PathBuf::from("/tmp/keystore.json"))
+        }
+
+        async fn submit_faucet(&mut self, _address: &DAddr) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn poll_balance(&mut self, _address: &DAddr) -> anyhow::Result<Balance> {
+            // The faucet dispenses DRT only; DGT is never funded this way.
+            Ok(Balance {
+                dgt: 0,
+                drt: 10_000,
+            })
+        }
+
+        async fn wait(&mut self, _duration: Duration) {}
+    }
+
+    #[tokio::test]
+    async fn funding_confirms_on_drt_when_dgt_stays_zero() {
+        // Regression: init previously required `dgt > 0 && drt > 0`, which could
+        // never confirm because the faucet does not dispense DGT — so a real
+        // freshly-funded wallet always hit the 45s timeout. Confirming on DRT
+        // alone must succeed and must not claim a DGT credit that never happened.
+        let mut services = DrtOnlyInitServices;
+        let mut lines = Vec::new();
+        let result = run_with_services(&mut services, |line| lines.push(line)).await;
+        assert!(result.is_ok(), "init should confirm funding on DRT alone");
+        assert!(
+            lines.iter().any(|line| line.contains("DRT received")),
+            "should report DRT funding"
+        );
+        assert!(
+            !lines.iter().any(|line| line.contains("DGT received")),
+            "should not report DGT when the faucet dispensed none"
+        );
     }
 }
