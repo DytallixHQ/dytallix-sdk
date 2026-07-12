@@ -297,12 +297,12 @@ async fn sign_contract_transaction(
     };
     let fee = tx.estimate_fee(&client).await.map_err(humanize_sdk_error)?;
     let required_fee_micro = fee.total_cost_drt;
-    let available_fee_micro = account.balance.dgt.saturating_mul(MICROS_PER_TOKEN);
+    let available_fee_micro = account.balance.drt.saturating_mul(MICROS_PER_TOKEN);
     if available_fee_micro < required_fee_micro {
         return Err(anyhow!(
-            "Insufficient DGT for gas fees. Required: {} DGT. Available: {} DGT. Run dytallix faucet to get more.",
+            "Insufficient DRT for gas fees. Required: {} DRT. Available: {} DRT. Run dytallix faucet to get more.",
             format_micro_amount(required_fee_micro),
-            format_number(account.balance.dgt)
+            format_number(account.balance.drt)
         ));
     }
 
